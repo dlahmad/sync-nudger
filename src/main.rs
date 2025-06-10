@@ -1,0 +1,304 @@
+use anyhow::{Result, bail};
+use clap::Parser;
+use std::{
+    env,
+    fs::{self, File},
+    io::Write,
+    process::Command,
+};
+
+/// Rust version of the multi-split/delay audio tool
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+struct Args {
+    /// Input MKV file
+    #[arg(short, long)]
+    input: String,
+
+    /// Output MKV file
+    #[arg(short, long)]
+    output: String,
+
+    /// Audio stream index (e.g. 6)
+    #[arg(short, long)]
+    stream: usize,
+
+    /// Delay for the first audio segment in ms.
+    #[arg(long, default_value_t = 0)]
+    initial_delay: u32,
+
+    /// Split points and subsequent delays, in format <seconds>:<delay_ms>.
+    /// Can be specified multiple times. E.g. --split 177.3:360 --split 672.3:360
+    #[arg(short = 'p', long = "split", value_parser = parse_split)]
+    splits: Vec<(f64, u32)>,
+
+    /// Output bitrate (e.g. 80k). If not provided, it will be detected automatically.
+    #[arg(short, long)]
+    bitrate: Option<String>,
+}
+
+fn parse_split(s: &str) -> Result<(f64, u32), String> {
+    let pos = s
+        .rfind(':')
+        .ok_or_else(|| format!("invalid format: '{}', expected <time>:<delay>", s))?;
+    let time = s[..pos]
+        .parse()
+        .map_err(|e| format!("invalid time in '{}': {}", s, e))?;
+    let delay = s[pos + 1..]
+        .parse()
+        .map_err(|e| format!("invalid delay in '{}': {}", s, e))?;
+    Ok((time, delay))
+}
+
+fn run_ffmpeg(args: &[&str]) -> Result<()> {
+    let status = Command::new("ffmpeg").args(args).status()?;
+    if !status.success() {
+        bail!("FFmpeg failed: {:?}", args);
+    }
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Make temp dir for files
+    let tmpdir = env::temp_dir().join(format!("split_audio_{}", std::process::id()));
+    fs::create_dir_all(&tmpdir)?;
+
+    // Get audio stream info to find audio track index and bitrate
+    let ffprobe_streams = Command::new("ffprobe")
+        .args(&[
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=index,codec_type",
+            "-of",
+            "csv=p=0",
+            &args.input,
+        ])
+        .output()?;
+    let streams_info = String::from_utf8_lossy(&ffprobe_streams.stdout);
+
+    let mut audio_count = 0;
+    let mut audio_stream_idx = -1isize;
+    for line in streams_info.lines() {
+        let parts: Vec<_> = line.split(',').collect();
+        if parts.len() == 2 && parts[1] == "audio" {
+            if parts[0].parse::<usize>().unwrap() == args.stream {
+                audio_stream_idx = audio_count;
+                break;
+            }
+            audio_count += 1;
+        }
+    }
+    if audio_stream_idx < 0 {
+        bail!("Could not find audio stream {} in mapping", args.stream);
+    }
+
+    // Determine bitrate
+    let bitrate = if let Some(b) = args.bitrate {
+        println!("ℹ️ Using user-provided bitrate: {}", b);
+        b
+    } else {
+        // Get bitrate from input stream
+        let ffprobe_bitrate = Command::new("ffprobe")
+            .args(&[
+                "-v",
+                "error",
+                "-select_streams",
+                &format!("a:{}", audio_stream_idx),
+                "-show_entries",
+                "stream=bit_rate",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                &args.input,
+            ])
+            .output()?;
+        let bitrate_str = String::from_utf8_lossy(&ffprobe_bitrate.stdout)
+            .trim()
+            .to_owned();
+
+        if bitrate_str == "N/A" || bitrate_str.is_empty() {
+            bail!(
+                "Could not determine bitrate automatically. Please provide it with --bitrate <bitrate> (e.g. 80k)"
+            );
+        } else {
+            let bitrate_bps: u32 = bitrate_str.parse()?;
+            let b = format!("{}k", bitrate_bps / 1000);
+            println!("ℹ️ Automatically detected bitrate: {}", b);
+            b
+        }
+    };
+
+    // Parse split points and delays
+    let mut split_points: Vec<f64> = Vec::new();
+    let mut delays: Vec<u32> = vec![args.initial_delay];
+    for (point, delay) in &args.splits {
+        split_points.push(*point);
+        delays.push(*delay);
+    }
+
+    let n = split_points.len();
+    if delays.len() != n + 1 {
+        bail!("Delays must have one more element than split points.");
+    }
+
+    let aac_path = tmpdir.join("german_audio.aac");
+
+    // 1. Extract German audio
+    run_ffmpeg(&[
+        "-y",
+        "-i",
+        &args.input,
+        "-map",
+        &format!("0:{}", args.stream),
+        "-c:a",
+        "copy",
+        aac_path.to_str().unwrap(),
+    ])?;
+
+    // 2. Split and delay
+    let mut split_files = Vec::new();
+    let mut prev = 0.0f64;
+    for i in 0..=n {
+        let part = tmpdir.join(format!("part_{}.aac", i + 1));
+        let (start, duration) = (prev, if i < n { split_points[i] - prev } else { 0.0 });
+        let start_str = start.to_string();
+        let mut ffmpeg_args = vec!["-y", "-i", aac_path.to_str().unwrap(), "-ss", &start_str];
+        let duration_str;
+        if i < n {
+            duration_str = duration.to_string();
+            ffmpeg_args.push("-t");
+            ffmpeg_args.push(&duration_str);
+            prev = split_points[i];
+        }
+        ffmpeg_args.extend_from_slice(&["-c:a", "aac", "-b:a", &bitrate, part.to_str().unwrap()]);
+        run_ffmpeg(&ffmpeg_args)?;
+
+        let delay = delays[i];
+        let target = if delay > 0 {
+            let delayed = tmpdir.join(format!("part_{}_delayed.aac", i + 1));
+            run_ffmpeg(&[
+                "-y",
+                "-i",
+                part.to_str().unwrap(),
+                "-filter_complex",
+                &format!("adelay={}|{}", delay, delay),
+                "-c:a",
+                "aac",
+                "-b:a",
+                &bitrate,
+                delayed.to_str().unwrap(),
+            ])?;
+            fs::remove_file(&part)?;
+            delayed
+        } else {
+            part
+        };
+        split_files.push(target);
+    }
+
+    // 3. Concat list
+    let concat_list = tmpdir.join("concat_list.txt");
+    let mut f = File::create(&concat_list)?;
+    for s in &split_files {
+        writeln!(f, "file '{}'", s.display())?;
+    }
+
+    let final_aac = tmpdir.join("german_audio_final.aac");
+    run_ffmpeg(&[
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        concat_list.to_str().unwrap(),
+        "-c:a",
+        "copy",
+        final_aac.to_str().unwrap(),
+    ])?;
+
+    // 4. Remux audio back in place of the original
+    let mut map_args: Vec<String> = Vec::new();
+    audio_count = 0;
+    for line in streams_info.lines() {
+        let parts: Vec<_> = line.split(',').collect();
+        if parts.len() == 2 && parts[1] == "audio" {
+            if parts[0].parse::<usize>().unwrap() == args.stream {
+                map_args.push("-map".to_string());
+                map_args.push("1:a:0".to_string());
+            } else {
+                map_args.push("-map".to_string());
+                map_args.push(format!("0:a:{}", audio_count));
+            }
+            audio_count += 1;
+        } else if parts.len() == 2 {
+            map_args.push("-map".to_string());
+            map_args.push(format!("0:{}", parts[0]));
+        }
+    }
+
+    // Get original audio title
+    let ffprobe_title = Command::new("ffprobe")
+        .args(&[
+            "-v",
+            "error",
+            "-select_streams",
+            &format!("a:{}", audio_stream_idx),
+            "-show_entries",
+            "stream_tags=title",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            &args.input,
+        ])
+        .output()?;
+    let original_title = String::from_utf8_lossy(&ffprobe_title.stdout)
+        .trim()
+        .to_owned();
+
+    // Get original audio language
+    let ffprobe_lang = Command::new("ffprobe")
+        .args(&[
+            "-v",
+            "error",
+            "-select_streams",
+            &format!("a:{}", audio_stream_idx),
+            "-show_entries",
+            "stream_tags=language",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            &args.input,
+        ])
+        .output()?;
+    let original_lang = String::from_utf8_lossy(&ffprobe_lang.stdout)
+        .trim()
+        .to_owned();
+
+    // Remux
+    let metadata_spec = format!("-metadata:s:a:{}", audio_stream_idx);
+    let title_value = format!("title={}", original_title);
+    let lang_value = format!("language={}", original_lang);
+
+    let mut ffmpeg_remux = vec!["-y", "-i", &args.input, "-i", final_aac.to_str().unwrap()];
+    ffmpeg_remux.extend(map_args.iter().map(|s| s.as_str()));
+    ffmpeg_remux.push("-c");
+    ffmpeg_remux.push("copy");
+
+    if !original_lang.is_empty() {
+        ffmpeg_remux.push(&metadata_spec);
+        ffmpeg_remux.push(&lang_value);
+    }
+    if !original_title.is_empty() {
+        ffmpeg_remux.push(&metadata_spec);
+        ffmpeg_remux.push(&title_value);
+    }
+    ffmpeg_remux.push(&args.output);
+    run_ffmpeg(&ffmpeg_remux)?;
+
+    // Cleanup
+    fs::remove_dir_all(&tmpdir)?;
+
+    println!("✅ Processing complete! Output: {}", args.output);
+    Ok(())
+}
