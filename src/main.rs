@@ -143,9 +143,9 @@ fn main() -> Result<()> {
         bail!("Delays must have one more element than split points.");
     }
 
-    let aac_path = tmpdir.join("german_audio.aac");
+    let aac_path = tmpdir.join("target_audio.aac");
 
-    // 1. Extract German audio
+    // 1. Extract target audio
     run_ffmpeg(&[
         "-y",
         "-i",
@@ -224,7 +224,7 @@ fn main() -> Result<()> {
         writeln!(f, "file '{}'", s.display())?;
     }
 
-    let final_aac = tmpdir.join("german_audio_final.aac");
+    let final_aac = tmpdir.join("target_audio_final.aac");
     run_ffmpeg(&[
         "-y",
         "-f",
