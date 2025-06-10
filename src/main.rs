@@ -25,19 +25,19 @@ struct Args {
 
     /// Delay for the first audio segment in ms.
     #[arg(long, default_value_t = 0)]
-    initial_delay: u32,
+    initial_delay: i32,
 
     /// Split points and subsequent delays, in format <seconds>:<delay_ms>.
     /// Can be specified multiple times. E.g. --split 177.3:360 --split 672.3:360
-    #[arg(short = 'p', long = "split", value_parser = parse_split)]
-    splits: Vec<(f64, u32)>,
+    #[arg(short = 'p', long = "split", value_parser = parse_split, num_args = 1..)]
+    splits: Vec<(f64, i32)>,
 
     /// Output bitrate (e.g. 80k). If not provided, it will be detected automatically.
     #[arg(short, long)]
     bitrate: Option<String>,
 }
 
-fn parse_split(s: &str) -> Result<(f64, u32), String> {
+fn parse_split(s: &str) -> Result<(f64, i32), String> {
     let pos = s
         .rfind(':')
         .ok_or_else(|| format!("invalid format: '{}', expected <time>:<delay>", s))?;
@@ -132,7 +132,7 @@ fn main() -> Result<()> {
 
     // Parse split points and delays
     let mut split_points: Vec<f64> = Vec::new();
-    let mut delays: Vec<u32> = vec![args.initial_delay];
+    let mut delays: Vec<i32> = vec![args.initial_delay];
     for (point, delay) in &args.splits {
         split_points.push(*point);
         delays.push(*delay);
@@ -178,12 +178,13 @@ fn main() -> Result<()> {
         let delay = delays[i];
         let target = if delay > 0 {
             let delayed = tmpdir.join(format!("part_{}_delayed.aac", i + 1));
+            let delay_str = delay.to_string();
             run_ffmpeg(&[
                 "-y",
                 "-i",
                 part.to_str().unwrap(),
                 "-filter_complex",
-                &format!("adelay={}|{}", delay, delay),
+                &format!("adelay={}|{}", delay_str, delay_str),
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -192,6 +193,24 @@ fn main() -> Result<()> {
             ])?;
             fs::remove_file(&part)?;
             delayed
+        } else if delay < 0 {
+            let trimmed = tmpdir.join(format!("part_{}_trimmed.aac", i + 1));
+            let trim_s = (-delay as f64) / 1000.0;
+            let trim_s_str = trim_s.to_string();
+            run_ffmpeg(&[
+                "-y",
+                "-i",
+                part.to_str().unwrap(),
+                "-ss",
+                &trim_s_str,
+                "-c:a",
+                "aac",
+                "-b:a",
+                &bitrate,
+                trimmed.to_str().unwrap(),
+            ])?;
+            fs::remove_file(&part)?;
+            trimmed
         } else {
             part
         };
