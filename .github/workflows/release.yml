@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Get the release version from the tag
         shell: bash
@@ -50,24 +50,20 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --verbose --release --target ${{ matrix.target }}
+        run: cargo build --verbose --release --target ${{ matrix.target }}
 
       - name: Build archive
         shell: bash
         run: |
           # Replace with the name of your binary
-          binary_name="<BINARY_NAME>"
+          binary_name="sync-nudger"
 
           dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
           mkdir "$dirname"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
+            cp "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname/"
           else
-            mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+            cp "target/${{ matrix.target }}/release/$binary_name" "$dirname/"
           fi
 
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
@@ -79,7 +75,7 @@ jobs:
           fi
 
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             ${{ env.ASSET }}
