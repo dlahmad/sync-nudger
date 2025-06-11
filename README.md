@@ -1,6 +1,6 @@
 # Sync-Nudger: Advanced Audio Splitting Tool
 
-[![Build and Release](https://github.com/sahmad/sync-nudger/actions/workflows/release.yml/badge.svg)](https://github.com/sahmad/sync-nudger/actions/workflows/release.yml)
+[![Deploy](https://github.com/dlahmad/sync-nudger/actions/workflows/release.yml/badge.svg)](https://github.com/dlahmad/sync-nudger/actions/workflows/release.yml)
 
 Sync-Nudger is a command-line utility designed for precise audio stream manipulation within video files. It allows you to split an audio track at specific timestamps, apply individual delays to each new segment, and then seamlessly remux the modified audio back into the original container.
 
