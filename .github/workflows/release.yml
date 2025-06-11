@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build:
+    name: Build for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            name: linux-aarch64
+          # macOS
+          - os: macos-14
+            target: aarch64-apple-darwin
+            name: macos-aarch64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: macos-x86_64
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x86_64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            name: windows-aarch64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install dependencies for Linux AArch64 build
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          # Determine executable name and archive extension
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            exe_name="sync-nudger.exe"
+            archive_name="sync-nudger-${{ matrix.name }}.zip"
+          else
+            exe_name="sync-nudger"
+            archive_name="sync-nudger-${{ matrix.name }}.tar.gz"
+          fi
+          # Source path of the built binary
+          src_path="target/${{ matrix.target }}/release/${exe_name}"
+          # Create a temporary directory for packaging to keep things clean
+          release_dir="release-assets"
+          mkdir -p ${release_dir}
+
+          # Copy executable to the packaging directory
+          cp "${src_path}" "${release_dir}/"
+          # Create the archive
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            (cd ${release_dir} && 7z a "${archive_name}" "${exe_name}")
+          else
+            (cd ${release_dir} && tar -czvf "${archive_name}" "${exe_name}")
+          fi
+          # Move the final archive to the root for the next step
+          mv "${release_dir}/${archive_name}" .
+          echo "ARCHIVE_PATH=${archive_name}" >> $GITHUB_ENV
+
+      - name: Upload artifact for release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.name }}
+          path: ${{ env.ARCHIVE_PATH }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: release-assets-*
+          merge-multiple: true
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          body_path: .github/release_body.md
+          generate_release_notes: true
