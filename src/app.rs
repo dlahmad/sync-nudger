@@ -1,6 +1,6 @@
 use crate::{
     cli::Args,
-    ffmpeg::{check_dependency, find_quietest_point, run_ffmpeg},
+    ffmpeg::{check_dependency, check_ffmpeg_version, find_quietest_point, run_ffmpeg},
 };
 use anyhow::{Result, bail};
 use comfy_table::{Table, presets::UTF8_FULL};
@@ -12,7 +12,7 @@ use std::{
 };
 
 pub fn run(args: Args) -> Result<()> {
-    check_dependency("ffmpeg")?;
+    check_ffmpeg_version(args.ignore_ffmpeg_version)?;
     check_dependency("ffprobe")?;
 
     // Make temp dir for files

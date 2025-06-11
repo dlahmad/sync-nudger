@@ -43,6 +43,10 @@ pub struct Args {
     /// Show ffmpeg logs.
     #[arg(long)]
     pub debug: bool,
+
+    /// Ignore ffmpeg version check.
+    #[arg(long)]
+    pub ignore_ffmpeg_version: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

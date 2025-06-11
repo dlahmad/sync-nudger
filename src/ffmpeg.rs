@@ -6,6 +6,9 @@ use std::{
     process::{Command, Stdio},
 };
 
+const EXPECTED_FFMPEG_MAJOR_VERSION: u32 = 7;
+const EXPECTED_FFMPEG_MINOR_VERSION: u32 = 1;
+
 pub fn run_ffmpeg(args: &[&str], debug: bool) -> Result<()> {
     let mut command = Command::new("ffmpeg");
     command.args(args);
@@ -19,6 +22,39 @@ pub fn run_ffmpeg(args: &[&str], debug: bool) -> Result<()> {
         bail!("FFmpeg failed: {:?}", args);
     }
     Ok(())
+}
+
+pub fn check_ffmpeg_version(ignore_check: bool) -> Result<()> {
+    if ignore_check {
+        return Ok(());
+    }
+
+    let output = Command::new("ffmpeg").arg("-version").output()?;
+    if !output.status.success() {
+        bail!("Could not run `ffmpeg -version` to check version.");
+    }
+
+    let version_info = String::from_utf8_lossy(&output.stdout);
+    let re = Regex::new(r"ffmpeg version (\d+)\.(\d+)")?;
+
+    if let Some(caps) = re.captures(&version_info) {
+        let major: u32 = caps.get(1).unwrap().as_str().parse()?;
+        let minor: u32 = caps.get(2).unwrap().as_str().parse()?;
+
+        if major == EXPECTED_FFMPEG_MAJOR_VERSION && minor == EXPECTED_FFMPEG_MINOR_VERSION {
+            Ok(())
+        } else {
+            bail!(
+                "ffmpeg version mismatch. Expected v{}.{}, but found v{}.{}. Use --ignore-ffmpeg-version to bypass.",
+                EXPECTED_FFMPEG_MAJOR_VERSION,
+                EXPECTED_FFMPEG_MINOR_VERSION,
+                major,
+                minor
+            )
+        }
+    } else {
+        bail!("Could not parse ffmpeg version from output. Use --ignore-ffmpeg-version to bypass.");
+    }
 }
 
 pub fn check_dependency(cmd: &str) -> Result<()> {
