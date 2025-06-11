@@ -2,7 +2,7 @@ use crate::{
     cli::Args,
     ffmpeg::{
         check_and_display_ffmpeg, check_dependency, check_ffmpeg_version, find_quietest_point,
-        run_ffmpeg,
+        get_stream_bitrate_for_processing, inspect_audio_streams, run_ffmpeg,
     },
 };
 use anyhow::{Result, bail};
@@ -18,6 +18,54 @@ pub fn run(args: Args) -> Result<()> {
     // Handle --check-ffmpeg command
     if args.check_ffmpeg {
         return check_and_display_ffmpeg();
+    }
+
+    // Handle --inspect command
+    if args.inspect {
+        let input = args
+            .input
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--input is required for inspection"))?;
+
+        println!("🔍 Inspecting audio streams in: {}\n", input);
+
+        let streams = inspect_audio_streams(input)?;
+
+        if streams.is_empty() {
+            println!("❌ No audio streams found in the input file.");
+            return Ok(());
+        }
+
+        let mut table = Table::new();
+        table.load_preset(UTF8_FULL);
+        table.set_header(vec![
+            "Index",
+            "Codec",
+            "Channels",
+            "Sample Rate",
+            "Bitrate",
+            "Language",
+            "Title",
+        ]);
+
+        for stream in streams {
+            table.add_row(vec![
+                stream.index.to_string(),
+                stream.codec,
+                stream.channels,
+                stream.sample_rate,
+                stream.bitrate,
+                stream.language,
+                stream.title,
+            ]);
+        }
+
+        println!("{}", table);
+        println!(
+            "\n💡 Use the 'Index' value with --stream to select an audio stream for processing."
+        );
+
+        return Ok(());
     }
 
     // Validate required arguments for normal operation
@@ -118,33 +166,15 @@ pub fn run(args: Args) -> Result<()> {
         println!("ℹ️ Using user-provided bitrate: {}", b);
         b
     } else {
-        // Get bitrate from input stream
-        let ffprobe_bitrate = Command::new("ffprobe")
-            .args(&[
-                "-v",
-                "error",
-                "-select_streams",
-                &format!("a:{}", audio_stream_idx),
-                "-show_entries",
-                "stream=bit_rate",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                input,
-            ])
-            .output()?;
-        let bitrate_str = String::from_utf8_lossy(&ffprobe_bitrate.stdout)
-            .trim()
-            .to_owned();
-
-        if bitrate_str == "N/A" || bitrate_str.is_empty() {
-            bail!(
-                "Could not determine bitrate automatically. Please provide it with --bitrate <bitrate> (e.g. 80k)"
-            );
-        } else {
-            let bitrate_bps: u32 = bitrate_str.parse()?;
-            let b = format!("{}k", bitrate_bps / 1000);
-            println!("ℹ️ Automatically detected bitrate: {}", b);
-            b
+        // Use improved bitrate detection
+        match get_stream_bitrate_for_processing(input, stream) {
+            Ok(detected_bitrate) => {
+                println!("ℹ️ Automatically detected bitrate: {}", detected_bitrate);
+                detected_bitrate
+            }
+            Err(e) => {
+                bail!("{}", e);
+            }
         }
     };
 

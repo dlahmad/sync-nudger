@@ -51,6 +51,10 @@ pub struct Args {
     /// Check FFmpeg installation and version compatibility.
     #[arg(long)]
     pub check_ffmpeg: bool,
+
+    /// Inspect input file and show all audio streams in a table
+    #[arg(long)]
+    pub inspect: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

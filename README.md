@@ -22,6 +22,7 @@ The tool performs a series of operations to achieve its goal:
 
 ## Features
 
+* **Audio Stream Inspection**: View detailed information about all audio streams in a file before processing (`--inspect`).
 * **Precise Splitting**: Split audio at exact floating-point timestamps.
 * **Quiet Point Detection**: Automatically find the quietest split point within a given time range (`--split-range`).
 * **Per-Segment Delay**: Apply a unique delay in milliseconds to each audio segment, including the initial one.
@@ -130,6 +131,30 @@ You can download the latest pre-compiled binary for your operating system (Windo
 3. Place it in a directory that is included in your system's `PATH`.
 
 ## Usage
+
+### Inspecting Audio Streams
+
+Before processing, you can inspect the available audio streams in your file:
+
+```bash
+sync-nudger --input input.mkv --inspect
+```
+
+This will display a table showing all audio streams with their properties:
+
+```bash
+┌───────┬─────────┬──────────┬─────────────┬─────────┬──────────┬─────────────────────┐
+│ Index │ Codec   │ Channels │ Sample Rate │ Bitrate │ Language │ Title               │
+├───────┼─────────┼──────────┼─────────────┼─────────┼──────────┼─────────────────────┤
+│ 1     │ aac     │ 2        │ 48000 Hz    │ 128 kbps│ eng      │ English Audio       │
+│ 2     │ ac3     │ 6        │ 48000 Hz    │ 640 kbps│ eng      │ English Surround    │
+│ 3     │ dts     │ 8        │ 48000 Hz    │ 153 kbps│ eng      │ DTS-HD Master Audio │
+└───────┴─────────┴──────────┴─────────────┴─────────┴──────────┴─────────────────────┘
+
+💡 Use the 'Index' value with --stream to select an audio stream for processing.
+```
+
+### Processing Audio
 
 Here is an example of a typical command:
 
