@@ -2,9 +2,9 @@ use anyhow::{Result, bail};
 use clap::Parser;
 use std::{
     env,
-    fs::{self, File},
-    io::Write,
-    process::Command,
+    fs::{self},
+    io,
+    process::{Command, Stdio},
 };
 
 /// Rust version of the multi-split/delay audio tool
@@ -58,7 +58,30 @@ fn run_ffmpeg(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn check_dependency(cmd: &str) -> Result<()> {
+    match Command::new(cmd)
+        .arg("-version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if e.kind() == io::ErrorKind::NotFound {
+                bail!(
+                    "`{}` command not found. Please ensure it is installed and in your PATH.",
+                    cmd
+                );
+            }
+            Err(anyhow::anyhow!("Failed to run `{}`: {}", cmd, e))
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    check_dependency("ffmpeg")?;
+    check_dependency("ffprobe")?;
+
     let args = Args::parse();
 
     // Make temp dir for files
