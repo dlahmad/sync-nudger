@@ -1,1 +1,15 @@
 /target
+
+# Media files
+*.mkv
+*.m4a
+*.mp3
+*.flac
+*.wav
+*.ogg
+*.m4b
+*.m4a
+*.mp3
+
+# Log Files
+*.log
