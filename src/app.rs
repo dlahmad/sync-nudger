@@ -1,6 +1,9 @@
 use crate::{
     cli::Args,
-    ffmpeg::{check_dependency, check_ffmpeg_version, find_quietest_point, run_ffmpeg},
+    ffmpeg::{
+        check_and_display_ffmpeg, check_dependency, check_ffmpeg_version, find_quietest_point,
+        run_ffmpeg,
+    },
 };
 use anyhow::{Result, bail};
 use comfy_table::{Table, presets::UTF8_FULL};
@@ -12,6 +15,24 @@ use std::{
 };
 
 pub fn run(args: Args) -> Result<()> {
+    // Handle --check-ffmpeg command
+    if args.check_ffmpeg {
+        return check_and_display_ffmpeg();
+    }
+
+    // Validate required arguments for normal operation
+    let input = args
+        .input
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--input is required"))?;
+    let output = args
+        .output
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--output is required"))?;
+    let stream = args
+        .stream
+        .ok_or_else(|| anyhow::anyhow!("--stream is required"))?;
+
     check_ffmpeg_version(args.ignore_ffmpeg_version)?;
     check_dependency("ffprobe")?;
 
@@ -28,7 +49,7 @@ pub fn run(args: Args) -> Result<()> {
             "stream=index,codec_type,codec_name",
             "-of",
             "csv=p=0",
-            &args.input,
+            input,
         ])
         .output()?;
     let streams_info = String::from_utf8_lossy(&ffprobe_streams.stdout);
@@ -40,7 +61,7 @@ pub fn run(args: Args) -> Result<()> {
     for line in streams_info.lines() {
         let parts: Vec<_> = line.split(',').collect();
         if parts.len() >= 3 && parts[2] == "audio" {
-            if parts[0].parse::<usize>().unwrap() == args.stream {
+            if parts[0].parse::<usize>().unwrap() == stream {
                 audio_stream_idx = audio_count;
                 original_codec = parts[1].to_string();
                 break;
@@ -49,10 +70,10 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
     if audio_stream_idx < 0 {
-        bail!("Could not find audio stream {} in mapping", args.stream);
+        bail!("Could not find audio stream {} in mapping", stream);
     }
     if original_codec.is_empty() {
-        bail!("Could not determine codec for audio stream {}", args.stream);
+        bail!("Could not determine codec for audio stream {}", stream);
     }
     println!("ℹ️ Original audio codec: {}", original_codec);
 
@@ -67,7 +88,7 @@ pub fn run(args: Args) -> Result<()> {
             "stream_tags=title",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            &args.input,
+            input,
         ])
         .output()?;
     let original_title = String::from_utf8_lossy(&ffprobe_title.stdout)
@@ -85,7 +106,7 @@ pub fn run(args: Args) -> Result<()> {
             "stream_tags=language",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            &args.input,
+            input,
         ])
         .output()?;
     let original_lang = String::from_utf8_lossy(&ffprobe_lang.stdout)
@@ -108,7 +129,7 @@ pub fn run(args: Args) -> Result<()> {
                 "stream=bit_rate",
                 "-of",
                 "default=noprint_wrappers=1:nokey=1",
-                &args.input,
+                input,
             ])
             .output()?;
         let bitrate_str = String::from_utf8_lossy(&ffprobe_bitrate.stdout)
@@ -135,9 +156,9 @@ pub fn run(args: Args) -> Result<()> {
         &[
             "-y",
             "-i",
-            &args.input,
+            input,
             "-map",
-            &format!("0:{}", args.stream),
+            &format!("0:{}", stream),
             "-c:a",
             "flac",
             flac_path.to_str().unwrap(),
@@ -198,8 +219,8 @@ pub fn run(args: Args) -> Result<()> {
             .set_header(vec!["Parameter", "Value"]);
 
         info_table
-            .add_row(vec!["Input File", &args.input])
-            .add_row(vec!["Output File", &args.output]);
+            .add_row(vec!["Input File", input])
+            .add_row(vec!["Output File", output]);
 
         let stream_name = if !original_title.is_empty() {
             original_title.clone()
@@ -211,7 +232,7 @@ pub fn run(args: Args) -> Result<()> {
 
         info_table
             .add_row(vec!["Initial Delay", &format!("{} ms", args.initial_delay)])
-            .add_row(vec!["Stream ID", &format!("#{}", args.stream)])
+            .add_row(vec!["Stream ID", &format!("#{}", stream)])
             .add_row(vec!["Stream Name", &stream_name])
             .add_row(vec!["Codec", &original_codec])
             .add_row(vec!["Bitrate", &bitrate])
@@ -391,7 +412,7 @@ pub fn run(args: Args) -> Result<()> {
     for line in streams_info.lines() {
         let parts: Vec<_> = line.split(',').collect();
         if parts.len() == 3 && parts[2] == "audio" {
-            if parts[0].parse::<usize>().unwrap() == args.stream {
+            if parts[0].parse::<usize>().unwrap() == stream {
                 map_args.push("-map".to_string());
                 map_args.push("1:a:0".to_string());
             } else {
@@ -413,7 +434,7 @@ pub fn run(args: Args) -> Result<()> {
     let mut ffmpeg_remux = vec![
         "-y",
         "-i",
-        &args.input,
+        input,
         "-i",
         final_audio_for_remux.to_str().unwrap(),
     ];
@@ -429,12 +450,12 @@ pub fn run(args: Args) -> Result<()> {
         ffmpeg_remux.push(&metadata_spec);
         ffmpeg_remux.push(&title_value);
     }
-    ffmpeg_remux.push(&args.output);
+    ffmpeg_remux.push(output);
     run_ffmpeg(&ffmpeg_remux, args.debug)?;
 
     // Cleanup
     fs::remove_dir_all(&tmpdir)?;
 
-    println!("✅ Processing complete! Output: {}", args.output);
+    println!("✅ Processing complete! Output: {}", output);
     Ok(())
 }

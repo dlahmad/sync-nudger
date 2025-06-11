@@ -8,6 +8,7 @@ use std::{
 
 const EXPECTED_FFMPEG_MAJOR_VERSION: u32 = 7;
 const EXPECTED_FFMPEG_MINOR_VERSION: u32 = 1;
+const MINIMUM_FFMPEG_MAJOR_VERSION: u32 = 4;
 
 pub fn run_ffmpeg(args: &[&str], debug: bool) -> Result<()> {
     let mut command = Command::new("ffmpeg");
@@ -153,4 +154,113 @@ pub fn find_quietest_point(
         quietest_time, min_loudness
     );
     Ok(quietest_time)
+}
+
+pub fn check_and_display_ffmpeg() -> Result<()> {
+    println!("🔍 Checking FFmpeg installation...\n");
+
+    // Check if ffmpeg is available
+    match Command::new("ffmpeg").arg("-version").output() {
+        Ok(output) => {
+            if !output.status.success() {
+                bail!("❌ FFmpeg command failed to execute properly.");
+            }
+
+            let version_info = String::from_utf8_lossy(&output.stdout);
+            let re = Regex::new(r"ffmpeg version (\d+)\.(\d+)(?:\.(\d+))?")?;
+
+            if let Some(caps) = re.captures(&version_info) {
+                let major: u32 = caps.get(1).unwrap().as_str().parse()?;
+                let minor: u32 = caps.get(2).unwrap().as_str().parse()?;
+                let patch: u32 = caps.get(3).map_or(0, |m| m.as_str().parse().unwrap_or(0));
+
+                println!("✅ FFmpeg found:");
+                println!("   Version: {}.{}.{}", major, minor, patch);
+
+                if major >= MINIMUM_FFMPEG_MAJOR_VERSION {
+                    println!(
+                        "   Status: ✅ Compatible (minimum required: {}.0.0)",
+                        MINIMUM_FFMPEG_MAJOR_VERSION
+                    );
+                } else {
+                    println!(
+                        "   Status: ❌ Too old (minimum required: {}.0.0)",
+                        MINIMUM_FFMPEG_MAJOR_VERSION
+                    );
+                }
+
+                if major == EXPECTED_FFMPEG_MAJOR_VERSION && minor == EXPECTED_FFMPEG_MINOR_VERSION
+                {
+                    println!("   Note: This is the tested version");
+                } else {
+                    println!(
+                        "   Note: Tested with version {}.{}.x",
+                        EXPECTED_FFMPEG_MAJOR_VERSION, EXPECTED_FFMPEG_MINOR_VERSION
+                    );
+                }
+            } else {
+                println!("⚠️  Could not parse FFmpeg version from output");
+                println!(
+                    "   Raw output: {}",
+                    version_info.lines().next().unwrap_or("")
+                );
+            }
+        }
+        Err(e) => {
+            if e.kind() == io::ErrorKind::NotFound {
+                println!("❌ FFmpeg not found in PATH");
+                println!(
+                    "   Please install FFmpeg and ensure it's accessible from the command line"
+                );
+                bail!("FFmpeg is required but not installed");
+            } else {
+                bail!("Failed to check FFmpeg: {}", e);
+            }
+        }
+    }
+
+    println!();
+
+    // Check if ffprobe is available
+    match Command::new("ffprobe").arg("-version").output() {
+        Ok(output) => {
+            if output.status.success() {
+                println!("✅ FFprobe found and working");
+            } else {
+                println!("❌ FFprobe command failed");
+            }
+        }
+        Err(e) => {
+            if e.kind() == io::ErrorKind::NotFound {
+                println!("❌ FFprobe not found in PATH");
+                bail!("FFprobe is required but not installed");
+            } else {
+                println!("⚠️  Failed to check FFprobe: {}", e);
+            }
+        }
+    }
+
+    println!();
+
+    // Check for required filter
+    match Command::new("ffmpeg")
+        .args(&["-hide_banner", "-filters"])
+        .output()
+    {
+        Ok(output) => {
+            let filters = String::from_utf8_lossy(&output.stdout);
+            if filters.contains("ebur128") {
+                println!("✅ Required filter 'ebur128' is available");
+            } else {
+                println!("❌ Required filter 'ebur128' not found");
+                println!("   This filter is needed for loudness analysis");
+            }
+        }
+        Err(_) => {
+            println!("⚠️  Could not check available filters");
+        }
+    }
+
+    println!("\n🎉 FFmpeg check complete!");
+    Ok(())
 }

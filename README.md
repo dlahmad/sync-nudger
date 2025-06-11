@@ -37,6 +37,90 @@ The tool performs a series of operations to achieve its goal:
 
 You must have **`ffmpeg`** and **`ffprobe`** installed and available in your system's `PATH`. These tools are essential for all audio and video processing.
 
+#### FFmpeg Version Requirements
+
+Sync-Nudger requires **FFmpeg version 4.0 or higher** to function properly. The tool specifically relies on:
+
+* The `ebur128` filter for accurate loudness measurement (available since FFmpeg 4.0)
+* Advanced audio processing capabilities
+* Proper stream handling for complex media files
+
+#### Checking Your FFmpeg Installation
+
+**Quick Check with Sync-Nudger:**
+The easiest way to verify your FFmpeg installation is to use the built-in check command:
+
+```bash
+sync-nudger --check-ffmpeg
+```
+
+This will automatically verify:
+
+* FFmpeg and FFprobe availability
+* Version compatibility (4.0+ required)
+* Required filter availability (`ebur128`)
+
+**Manual Verification:**
+If you prefer to check manually:
+
+1. **Check if FFmpeg is installed and accessible:**
+
+   ```bash
+   ffmpeg -version
+   ffprobe -version
+   ```
+
+2. **Verify the version number:**
+   Look for the version information in the output. You should see something like:
+
+   ```bash
+   ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers
+   ```
+
+   The version number (e.g., `6.1.1`) should be 4.0 or higher.
+
+3. **Test the required filter:**
+   You can verify that the `ebur128` filter is available by running:
+
+   ```bash
+   ffmpeg -hide_banner -filters | grep ebur128
+   ```
+
+   This should return a line containing `ebur128` if the filter is available.
+
+#### Installing FFmpeg
+
+If you don't have FFmpeg installed or need to upgrade:
+
+* **macOS (using Homebrew):**
+
+  ```bash
+  brew install ffmpeg
+  ```
+
+* **Ubuntu/Debian:**
+
+  ```bash
+  sudo apt update
+  sudo apt install ffmpeg
+  ```
+
+* **Windows:**
+  Download from the [official FFmpeg website](https://ffmpeg.org/download.html)
+
+* **Other distributions:**
+  Check your package manager or visit the [FFmpeg download page](https://ffmpeg.org/download.html)
+
+#### Bypassing Version Checks
+
+If you're confident your FFmpeg installation will work despite version warnings, you can bypass the version check using:
+
+```bash
+sync-nudger --ignore-ffmpeg-version [other options...]
+```
+
+**Note:** Using an incompatible FFmpeg version may result in runtime errors or unexpected behavior.
+
 ### From Releases
 
 You can download the latest pre-compiled binary for your operating system (Windows, Linux, macOS) from the [**GitHub Releases**](https://github.com/sahmad/sync-nudger/releases) page.

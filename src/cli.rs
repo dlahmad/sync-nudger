@@ -6,15 +6,15 @@ use clap::Parser;
 pub struct Args {
     /// Input MKV file
     #[arg(short, long)]
-    pub input: String,
+    pub input: Option<String>,
 
     /// Output MKV file
     #[arg(short, long)]
-    pub output: String,
+    pub output: Option<String>,
 
     /// Audio stream index (e.g. 6)
     #[arg(short, long)]
-    pub stream: usize,
+    pub stream: Option<usize>,
 
     /// Delay for the first audio segment in ms.
     #[arg(long, default_value_t = 0)]
@@ -47,6 +47,10 @@ pub struct Args {
     /// Ignore ffmpeg version check.
     #[arg(long)]
     pub ignore_ffmpeg_version: bool,
+
+    /// Check FFmpeg installation and version compatibility.
+    #[arg(long)]
+    pub check_ffmpeg: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
