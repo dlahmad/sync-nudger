@@ -2,9 +2,15 @@
 name = "sync-nudger"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/dlahmad/sync-nudger"
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
 anyhow = "1.0"
 regex = "1.11.1"
 comfy-table = "7.1.4"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
