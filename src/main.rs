@@ -71,7 +71,7 @@ fn main() -> Result<()> {
             "-v",
             "error",
             "-show_entries",
-            "stream=index,codec_type",
+            "stream=index,codec_type,codec_name",
             "-of",
             "csv=p=0",
             &args.input,
@@ -81,11 +81,13 @@ fn main() -> Result<()> {
 
     let mut audio_count = 0;
     let mut audio_stream_idx = -1isize;
+    let mut original_codec = String::new();
     for line in streams_info.lines() {
         let parts: Vec<_> = line.split(',').collect();
-        if parts.len() == 2 && parts[1] == "audio" {
+        if parts.len() == 3 && parts[2] == "audio" {
             if parts[0].parse::<usize>().unwrap() == args.stream {
                 audio_stream_idx = audio_count;
+                original_codec = parts[1].to_string();
                 break;
             }
             audio_count += 1;
@@ -94,6 +96,10 @@ fn main() -> Result<()> {
     if audio_stream_idx < 0 {
         bail!("Could not find audio stream {} in mapping", args.stream);
     }
+    if original_codec.is_empty() {
+        bail!("Could not determine codec for audio stream {}", args.stream);
+    }
+    println!("ℹ️ Original audio codec: {}", original_codec);
 
     // Determine bitrate
     let bitrate = if let Some(b) = args.bitrate {
@@ -143,7 +149,7 @@ fn main() -> Result<()> {
         bail!("Delays must have one more element than split points.");
     }
 
-    let aac_path = tmpdir.join("target_audio.aac");
+    let flac_path = tmpdir.join("target_audio.flac");
 
     // 1. Extract target audio
     run_ffmpeg(&[
@@ -153,18 +159,18 @@ fn main() -> Result<()> {
         "-map",
         &format!("0:{}", args.stream),
         "-c:a",
-        "copy",
-        aac_path.to_str().unwrap(),
+        "flac",
+        flac_path.to_str().unwrap(),
     ])?;
 
     // 2. Split and delay
     let mut split_files = Vec::new();
     let mut prev = 0.0f64;
     for i in 0..=n {
-        let part = tmpdir.join(format!("part_{}.aac", i + 1));
+        let part = tmpdir.join(format!("part_{}.flac", i + 1));
         let (start, duration) = (prev, if i < n { split_points[i] - prev } else { 0.0 });
         let start_str = start.to_string();
-        let mut ffmpeg_args = vec!["-y", "-i", aac_path.to_str().unwrap(), "-ss", &start_str];
+        let mut ffmpeg_args = vec!["-y", "-i", flac_path.to_str().unwrap(), "-ss", &start_str];
         let duration_str;
         if i < n {
             duration_str = duration.to_string();
@@ -172,29 +178,33 @@ fn main() -> Result<()> {
             ffmpeg_args.push(&duration_str);
             prev = split_points[i];
         }
-        ffmpeg_args.extend_from_slice(&["-c:a", "aac", "-b:a", &bitrate, part.to_str().unwrap()]);
+        ffmpeg_args.extend_from_slice(&[
+            "-af",
+            "asetpts=PTS-STARTPTS",
+            "-c:a",
+            "flac",
+            part.to_str().unwrap(),
+        ]);
         run_ffmpeg(&ffmpeg_args)?;
 
         let delay = delays[i];
         let target = if delay > 0 {
-            let delayed = tmpdir.join(format!("part_{}_delayed.aac", i + 1));
+            let delayed = tmpdir.join(format!("part_{}_delayed.flac", i + 1));
             let delay_str = delay.to_string();
             run_ffmpeg(&[
                 "-y",
                 "-i",
                 part.to_str().unwrap(),
                 "-filter_complex",
-                &format!("adelay={}|{}", delay_str, delay_str),
+                &format!("adelay={}|{},asetpts=PTS-STARTPTS", delay_str, delay_str),
                 "-c:a",
-                "aac",
-                "-b:a",
-                &bitrate,
+                "flac",
                 delayed.to_str().unwrap(),
             ])?;
             fs::remove_file(&part)?;
             delayed
         } else if delay < 0 {
-            let trimmed = tmpdir.join(format!("part_{}_trimmed.aac", i + 1));
+            let trimmed = tmpdir.join(format!("part_{}_trimmed.flac", i + 1));
             let trim_s = (-delay as f64) / 1000.0;
             let trim_s_str = trim_s.to_string();
             run_ffmpeg(&[
@@ -203,10 +213,10 @@ fn main() -> Result<()> {
                 part.to_str().unwrap(),
                 "-ss",
                 &trim_s_str,
+                "-af",
+                "asetpts=PTS-STARTPTS",
                 "-c:a",
-                "aac",
-                "-b:a",
-                &bitrate,
+                "flac",
                 trimmed.to_str().unwrap(),
             ])?;
             fs::remove_file(&part)?;
@@ -218,32 +228,60 @@ fn main() -> Result<()> {
     }
 
     // 3. Concat list
-    let concat_list = tmpdir.join("concat_list.txt");
-    let mut f = File::create(&concat_list)?;
+    // Use the concat filter for robustness, as the concat demuxer can fail with timestamp issues.
+    let mut concat_args: Vec<String> = vec!["-y".to_string()];
     for s in &split_files {
-        writeln!(f, "file '{}'", s.display())?;
+        concat_args.push("-i".to_string());
+        concat_args.push(s.to_str().unwrap().to_string());
     }
 
-    let final_aac = tmpdir.join("target_audio_final.aac");
+    let filter_complex_str = (0..split_files.len())
+        .map(|i| format!("[{}:a]", i))
+        .collect::<String>()
+        + &format!("concat=n={}:v=0:a=1[a]", split_files.len());
+
+    concat_args.push("-filter_complex".to_string());
+    concat_args.push(filter_complex_str);
+    concat_args.push("-map".to_string());
+    concat_args.push("[a]".to_string());
+
+    let final_flac = tmpdir.join("target_audio_final.flac");
+    concat_args.push("-c:a".to_string());
+    concat_args.push("flac".to_string());
+    concat_args.push(final_flac.to_str().unwrap().to_string());
+
+    let concat_args_slice: Vec<&str> = concat_args.iter().map(|s| s.as_str()).collect();
+    run_ffmpeg(&concat_args_slice)?;
+
+    // 4. Convert final audio back to original codec
+    let final_extension = match original_codec.as_str() {
+        "aac" => "aac",
+        "ac3" => "ac3",
+        "dts" => "dts",
+        "mp3" => "mp3",
+        "opus" => "opus",
+        _ => "mka", // Matroska audio as a safe fallback container
+    };
+    let final_audio_for_remux = tmpdir.join(format!("final_for_remux.{}", final_extension));
     run_ffmpeg(&[
         "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
         "-i",
-        concat_list.to_str().unwrap(),
+        final_flac.to_str().unwrap(),
+        "-af",
+        "asetpts=PTS-STARTPTS",
         "-c:a",
-        "copy",
-        final_aac.to_str().unwrap(),
+        &original_codec,
+        "-b:a",
+        &bitrate,
+        final_audio_for_remux.to_str().unwrap(),
     ])?;
 
-    // 4. Remux audio back in place of the original
+    // 5. Remux audio back in place of the original
     let mut map_args: Vec<String> = Vec::new();
     audio_count = 0;
     for line in streams_info.lines() {
         let parts: Vec<_> = line.split(',').collect();
-        if parts.len() == 2 && parts[1] == "audio" {
+        if parts.len() == 3 && parts[2] == "audio" {
             if parts[0].parse::<usize>().unwrap() == args.stream {
                 map_args.push("-map".to_string());
                 map_args.push("1:a:0".to_string());
@@ -252,7 +290,7 @@ fn main() -> Result<()> {
                 map_args.push(format!("0:a:{}", audio_count));
             }
             audio_count += 1;
-        } else if parts.len() == 2 {
+        } else if parts.len() == 3 {
             map_args.push("-map".to_string());
             map_args.push(format!("0:{}", parts[0]));
         }
@@ -299,7 +337,13 @@ fn main() -> Result<()> {
     let title_value = format!("title={}", original_title);
     let lang_value = format!("language={}", original_lang);
 
-    let mut ffmpeg_remux = vec!["-y", "-i", &args.input, "-i", final_aac.to_str().unwrap()];
+    let mut ffmpeg_remux = vec![
+        "-y",
+        "-i",
+        &args.input,
+        "-i",
+        final_audio_for_remux.to_str().unwrap(),
+    ];
     ffmpeg_remux.extend(map_args.iter().map(|s| s.as_str()));
     ffmpeg_remux.push("-c");
     ffmpeg_remux.push("copy");
