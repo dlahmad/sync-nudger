@@ -24,6 +24,10 @@ jobs:
             os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
 
+          - build: linux-armv7
+            os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+
           - build: macos
             os: macos-latest
             target: x86_64-apple-darwin
@@ -40,6 +44,10 @@ jobs:
             os: windows-latest
             target: aarch64-pc-windows-msvc
 
+          - build: linux-riscv64
+            os: ubuntu-latest
+            target: riscv64gc-unknown-linux-gnu
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,10 +62,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
+      - name: Install Linux ARMv7 cross toolchain and libc
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf libc6-dev-armhf-cross
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Set up Cargo cross-linker config
+        run: |
+          mkdir -p .cargo
+          cat <<EOF > .cargo/config.toml
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          [target.armv7-unknown-linux-gnueabihf]
+          linker = "arm-linux-gnueabihf-gcc"
+          EOF
 
       - name: Build
         run: cargo build --verbose --release --target ${{ matrix.target }}
