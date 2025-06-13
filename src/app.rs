@@ -38,6 +38,9 @@ pub fn run(args: Args) -> Result<()> {
         .output
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--output is required"))?;
+    if input == output {
+        bail!("Input and output file cannot be the same.");
+    }
     let stream = args
         .stream
         .ok_or_else(|| anyhow::anyhow!("--stream is required"))?;
