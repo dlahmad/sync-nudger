@@ -387,12 +387,13 @@ dependencies = [
 
 [[package]]
 name = "sync-nudger"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
  "comfy-table",
  "regex",
+ "serde",
  "serde_json",
  "thiserror",
 ]

@@ -154,34 +154,104 @@ This will display a table showing all audio streams with their properties:
 💡 Use the 'Index' value with --stream to select an audio stream for processing.
 ```
 
-### Processing Audio
+### Using Split and Delay Arguments
 
-Here is an example of a typical command:
+You can use `--split`, `--split-range`, and `--initial-delay` together in any combination to define your split points and delays. For example:
 
 ```sh
 sync-nudger \
     --input "my_video.mkv" \
     --output "my_video_synced.mkv" \
     --stream 6 \
-    --initial-delay -50 \
     --split 177.3:360 \
     --split-range 850.5:855.1:360 \
-    --bitrate 128k
+    --initial-delay -50
 ```
 
-This command will:
+### Using a Split Map JSON File
 
-* Process the audio stream with index `6` from `my_video.mkv`.
-* Trim `50ms` from the beginning of the audio.
-* Create a split at exactly `177.3` seconds and apply a `360ms` delay to the following segment.
-* Find the quietest point between `850.5s` and `855.1s`, create a split there, and apply a `360ms` delay to the final segment.
-* Re-encode the final audio to a bitrate of `128k`.
-* Save the result to `my_video_synced.mkv`.
+You can provide all split points, split ranges, and the initial delay in a single JSON file using the `--split-map` flag. **This is exclusive:** you cannot use `--split-map` together with `--split`, `--split-range`, or `--initial-delay`.
 
-## Disclosure
+**Example JSON file (`splits.json`):**
 
-This project is being created with the help of AI. Specifically cursor is the main AI tooing involved.
+```json
+{
+  "initial_delay": -50,
+  "splits": [[177.3, 360]],
+  "split_ranges": [
+    { "startTime": 850.5, "endTime": 855.1, "delay": 360 }
+  ]
+}
+```
 
-## License
+**Usage:**
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+```sh
+sync-nudger \
+    --input "my_video.mkv" \
+    --output "my_video_synced.mkv" \
+    --stream 6 \
+    --split-map splits.json
+```
+
+### Saving a Split Map for Reproducibility
+
+You can save the resolved split points and delays to a JSON file using the `--write-split-map` option. This allows you to reproduce the same operation later using `--split-map`.
+
+* If you use `--write-split-map` **with a filename**, that file will be used.
+* If you use `--write-split-map` **as a flag with no filename**, the output file will be the input file name (without extension) plus `.json`.
+
+**What gets saved:**
+
+* If you provide `--split`, only those split points will be saved in the JSON.
+* If you provide `--split-range`, only the original ranges will be saved in the JSON (not the derived split points).
+* If you provide both, both will be present in the JSON.
+* The split map is a faithful record of your input arguments, not the resolved plan.
+
+**Examples:**
+
+*Only split points:*
+
+```json
+{
+  "initial_delay": 0,
+  "splits": [
+    { "time": 100.5, "delay": 200 },
+    { "time": 300.25, "delay": 400 }
+  ],
+  "split_ranges": []
+}
+```
+
+*Only split ranges:*
+
+```json
+{
+  "initial_delay": 0,
+  "splits": [],
+  "split_ranges": [
+    { "startTime": 100.75, "endTime": 110.5, "delay": 200 },
+    { "startTime": 825.1, "endTime": 832.9, "delay": 400 }
+  ]
+}
+```
+
+*Both:*
+
+```json
+{
+  "initial_delay": 0,
+  "splits": [
+    { "time": 100.5, "delay": 200 }
+  ],
+  "split_ranges": [
+    { "startTime": 825.1, "endTime": 832.9, "delay": 400 }
+  ]
+}
+```
+
+Note: Fractions of seconds are supported for all time fields (`time`, `startTime`, `endTime`).
+
+Later, you can reproduce the same operation with:
+
+```

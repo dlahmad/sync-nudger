@@ -1,4 +1,5 @@
 use clap::Parser;
+use serde;
 
 /// Rust version of the multi-split/delay audio tool
 #[derive(Parser, Debug)]
@@ -16,18 +17,25 @@ pub struct Args {
     #[arg(short, long)]
     pub stream: Option<usize>,
 
-    /// Delay for the first audio segment in ms.
-    #[arg(long, default_value_t = 0)]
+    /// Path to a JSON file containing split points and delays (conflicts with --split, --split-range, --initial-delay)
+    #[arg(
+        long = "split-map",
+        conflicts_with = "initial_delay",
+        conflicts_with = "splits",
+        conflicts_with = "split_ranges"
+    )]
+    pub split_map: Option<Option<String>>,
+
+    /// Delay for the first audio segment in ms. (conflicts with --split-map)
+    #[arg(long, default_value_t = 0, conflicts_with = "split_map")]
     pub initial_delay: i32,
 
-    /// Split points and subsequent delays, in format <seconds>:<delay_ms>.
-    /// Can be specified multiple times. E.g. --split 177.3:360 --split 672.3:360
-    #[arg(short = 'p', long = "split", value_parser = parse_split, num_args = 1..)]
-    pub splits: Vec<(f64, i32)>,
+    /// Split points and subsequent delays, in format <seconds>:<delay_ms>. (conflicts with --split-map)
+    #[arg(short = 'p', long = "split", value_parser = parse_split, num_args = 1.., conflicts_with = "split_map")]
+    pub splits: Vec<SplitPoint>,
 
-    /// Split ranges and subsequent delays, in format <start_time>:<end_time>:<delay_ms>.
-    /// Can be specified multiple times. E.g. --split-range 177.3:672.3:360
-    #[arg(long = "split-range", value_parser = parse_split_range, num_args = 1..)]
+    /// Split ranges and subsequent delays, in format <start_time>:<end_time>:<delay_ms>. (conflicts with --split-map)
+    #[arg(long = "split-range", value_parser = parse_split_range, num_args = 1.., conflicts_with = "split_map")]
     pub split_ranges: Vec<SplitRange>,
 
     /// Output bitrate (e.g. 80k). If not provided, it will be detected automatically.
@@ -55,16 +63,38 @@ pub struct Args {
     /// Inspect input file and show all audio streams in a table
     #[arg(long)]
     pub inspect: bool,
+
+    /// Write the resolved split map (after all split points and delays are determined) to this file as JSON. If no file is provided, the input file name (without extension) will be used with .json.
+    #[arg(long = "write-split-map", num_args = 0..=1, value_name = "FILE")]
+    pub write_split_map: Option<Option<String>>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct SplitPoint {
+    pub time: f64,
+    pub delay: i32,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct SplitRange {
+    #[serde(rename = "startTime")]
     pub start: f64,
+    #[serde(rename = "endTime")]
     pub end: f64,
     pub delay: i32,
 }
 
-fn parse_split(s: &str) -> Result<(f64, i32), String> {
+#[derive(Debug, serde::Deserialize, serde::Serialize, Default)]
+pub struct SplitMap {
+    #[serde(default)]
+    pub initial_delay: Option<i32>,
+    #[serde(default)]
+    pub splits: Vec<SplitPoint>,
+    #[serde(default)]
+    pub split_ranges: Vec<SplitRange>,
+}
+
+fn parse_split(s: &str) -> Result<SplitPoint, String> {
     let pos = s
         .rfind(':')
         .ok_or_else(|| format!("invalid format: '{}', expected <time>:<delay>", s))?;
@@ -74,7 +104,7 @@ fn parse_split(s: &str) -> Result<(f64, i32), String> {
     let delay = s[pos + 1..]
         .parse()
         .map_err(|e| format!("invalid delay in '{}': {}", s, e))?;
-    Ok((time, delay))
+    Ok(SplitPoint { time, delay })
 }
 
 fn parse_split_range(s: &str) -> Result<SplitRange, String> {
@@ -98,4 +128,17 @@ fn parse_split_range(s: &str) -> Result<SplitRange, String> {
         return Err(format!("start time must be less than end time in '{}'", s));
     }
     Ok(SplitRange { start, end, delay })
+}
+
+impl Args {
+    pub fn load_split_map(&self) -> anyhow::Result<Option<SplitMap>> {
+        match &self.split_map {
+            Some(Some(path)) => {
+                let contents = std::fs::read_to_string(path)?;
+                let split_map: SplitMap = serde_json::from_str(&contents)?;
+                Ok(Some(split_map))
+            }
+            Some(None) | None => Ok(None),
+        }
+    }
 }

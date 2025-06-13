@@ -1,6 +1,6 @@
 [package]
 name = "sync-nudger"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 repository = "https://github.com/dlahmad/sync-nudger"
 
@@ -11,6 +11,7 @@ regex = "1.11.1"
 comfy-table = "7.1.4"
 serde_json = "1.0.140"
 thiserror = "2.0.12"
+serde = { version = "1.0", features = ["derive"] }
 
 [profile.release]
 opt-level = "z"

@@ -7,10 +7,12 @@ use crate::{
 };
 use anyhow::{Result, bail};
 use comfy_table::{Table, presets::UTF8_FULL};
+use serde_json;
 use std::{
     env,
     fs::{self},
     io,
+    io::Write,
     process::Command,
 };
 
@@ -162,17 +164,17 @@ pub fn run(args: Args) -> Result<()> {
 
     // 2. Resolve split points
     println!("ℹ️ Resolving split points...");
-    // The String will hold the 'source' of the split for the summary table
     let mut all_splits: Vec<(f64, i32, String)> = Vec::new();
+    let mut initial_delay = args.initial_delay;
 
-    if !args.splits.is_empty() {
-        for (point, delay) in &args.splits {
-            all_splits.push((*point, *delay, format!("{:.3}", point)));
+    if let Some(split_map) = args.load_split_map()? {
+        if let Some(id) = split_map.initial_delay {
+            initial_delay = id;
         }
-    }
-
-    if !args.split_ranges.is_empty() {
-        for range in &args.split_ranges {
+        for split in split_map.splits {
+            all_splits.push((split.time, split.delay, format!("{:.3}", split.time)));
+        }
+        for range in split_map.split_ranges {
             println!(
                 "ℹ️ Finding quietest point in range {:.3}s - {:.3}s",
                 range.start, range.end
@@ -184,12 +186,9 @@ pub fn run(args: Args) -> Result<()> {
                 args.silence_threshold,
                 args.debug,
             )?;
-
-            // Display debug output if available
             if let Some(debug_output) = &result.debug_output {
                 eprintln!("{}", debug_output);
             }
-
             println!(
                 "  ✅ Found quietest point at {:.3}s (Loudness: {:.2} LUFS)",
                 result.time, result.loudness
@@ -200,8 +199,64 @@ pub fn run(args: Args) -> Result<()> {
                 format!("{:.3}-{:.3}", range.start, range.end),
             ));
         }
+    } else {
+        if !args.splits.is_empty() {
+            for split in &args.splits {
+                all_splits.push((split.time, split.delay, format!("{:.3}", split.time)));
+            }
+        }
+        if !args.split_ranges.is_empty() {
+            for range in &args.split_ranges {
+                println!(
+                    "ℹ️ Finding quietest point in range {:.3}s - {:.3}s",
+                    range.start, range.end
+                );
+                let result = find_quietest_point(
+                    &flac_path,
+                    range.start,
+                    range.end,
+                    args.silence_threshold,
+                    args.debug,
+                )?;
+                if let Some(debug_output) = &result.debug_output {
+                    eprintln!("{}", debug_output);
+                }
+                println!(
+                    "  ✅ Found quietest point at {:.3}s (Loudness: {:.2} LUFS)",
+                    result.time, result.loudness
+                );
+                all_splits.push((
+                    result.time,
+                    range.delay,
+                    format!("{:.3}-{:.3}", range.start, range.end),
+                ));
+            }
+        }
     }
     all_splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    // Optionally write the split map to a file
+    if let Some(write_split_map) = &args.write_split_map {
+        let out_path = if let Some(path) = write_split_map {
+            path.clone()
+        } else {
+            // Use input file name without extension + .json
+            let input_path = std::path::Path::new(input);
+            let stem = input_path.file_stem().unwrap_or_default();
+            let mut out = std::path::PathBuf::from(stem);
+            out.set_extension("json");
+            out.to_string_lossy().to_string()
+        };
+        let split_map = crate::cli::SplitMap {
+            initial_delay: Some(initial_delay),
+            splits: args.splits.clone(),
+            split_ranges: args.split_ranges.clone(),
+        };
+        let json = serde_json::to_string_pretty(&split_map)?;
+        let mut file = fs::File::create(&out_path)?;
+        file.write_all(json.as_bytes())?;
+        println!("✅ Wrote split map to {}", out_path);
+    }
 
     // --- User Confirmation ---
     if !all_splits.is_empty() {
@@ -239,7 +294,7 @@ pub fn run(args: Args) -> Result<()> {
         };
 
         info_table
-            .add_row(vec!["Initial Delay", &format!("{} ms", args.initial_delay)])
+            .add_row(vec!["Initial Delay", &format!("{} ms", initial_delay)])
             .add_row(vec!["Stream ID", &format!("#{}", stream)])
             .add_row(vec!["Stream Name", &stream_name])
             .add_row(vec!["Codec", &original_codec])
@@ -264,7 +319,7 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     let mut split_points: Vec<f64> = Vec::new();
-    let mut delays: Vec<i32> = vec![args.initial_delay];
+    let mut delays: Vec<i32> = vec![initial_delay];
     for (point, delay, _) in &all_splits {
         split_points.push(*point);
         delays.push(*delay);
