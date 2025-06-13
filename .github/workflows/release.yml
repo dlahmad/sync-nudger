@@ -124,8 +124,10 @@ jobs:
         with:
           path: ${{ github.workspace }}/artifacts
 
-      - name: List artifacts
-        run: ls -la ${{ github.workspace }}/artifacts
+      - name: List all files in artifacts
+        run: |
+          echo "Listing all files and directories in ${{ github.workspace }}/artifacts:"
+          find ${{ github.workspace }}/artifacts -print
 
       - name: Checkout
         uses: actions/checkout@v4
