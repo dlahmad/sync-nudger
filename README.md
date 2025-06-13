@@ -2,7 +2,7 @@
 
 [![Deploy](https://github.com/dlahmad/sync-nudger/actions/workflows/release.yml/badge.svg)](https://github.com/dlahmad/sync-nudger/actions/workflows/release.yml)
 
-Sync-Nudger is a command-line utility designed for precise audio stream manipulation within video files. It allows you to split an audio track at specific timestamps, apply individual delays to each new segment, and then seamlessly remux the modified audio back into the original container.
+Sync-Nudger is a command-line utility designed for precise audio stream manipulation within video files. It allows you to split an audio track at specific timestamps, apply individual delays to each new segment (including fractional milliseconds), and then seamlessly remux the modified audio back into the original container.
 
 Its standout feature is the ability to find the quietest point within a given time range, ensuring that your splits are clean and occur during natural pauses in the audio.
 
@@ -13,9 +13,9 @@ The tool performs a series of operations to achieve its goal:
 1. **Extracts** the target audio stream into a temporary, high-quality FLAC file.
 2. **Analyzes** user-specified time ranges to find the quietest moment, using the EBU R 128 loudness standard for perceptual accuracy.
 3. **Resolves** all split points, whether provided as exact timestamps or as search ranges.
-4. **Asks for Confirmation** by presenting a detailed summary of the proposed changes before proceeding.
+4. **Asks for Confirmation** by presenting a detailed summary of the proposed changes before proceeding (can be auto-confirmed with `--yes`).
 5. **Splits** the audio into multiple parts based on the resolved points.
-6. **Applies** the specified millisecond delays to each part (or trims them if the delay is negative).
+6. **Applies** the specified millisecond delays (including fractional milliseconds) to each part (or trims them if the delay is negative).
 7. **Concatenates** the modified audio parts back into a single stream.
 8. **Re-encodes** the audio to its original format and bitrate.
 9. **Remuxes** the new audio stream back into the video file, replacing the original while keeping all other video, audio, and subtitle streams intact.
@@ -25,12 +25,13 @@ The tool performs a series of operations to achieve its goal:
 * **Audio Stream Inspection**: View detailed information about all audio streams in a file before processing (`--inspect`).
 * **Precise Splitting**: Split audio at exact floating-point timestamps.
 * **Quiet Point Detection**: Automatically find the quietest split point within a given time range (`--split-range`).
-* **Per-Segment Delay**: Apply a unique delay in milliseconds to each audio segment, including the initial one.
-* **User Confirmation**: Displays a detailed summary of the files, streams, and planned splits before executing, preventing accidental changes.
+* **Per-Segment Delay**: Apply a unique delay in milliseconds (including fractional) to each audio segment, including the initial one.
+* **User Confirmation**: Displays a detailed summary of the files, streams, and planned splits before executing, preventing accidental changes. Use `--yes` to auto-confirm.
 * **Configurable Silence Detection**: Tune the loudness threshold for what the tool considers "audible" vs. silent (`--silence-threshold`).
 * **FFmpeg Version Check**: Ensures a compatible version of `ffmpeg` is installed to prevent runtime errors. Can be bypassed (`--ignore-ffmpeg-version`).
 * **Debug Logging**: Optional verbose logging from `ffmpeg` for troubleshooting (`--debug`).
 * **Automated Releases**: Multi-platform binaries are built automatically via GitHub Actions.
+* **Split Map Support**: Use a JSON file to specify all splits, split ranges, and delays, or save your configuration for reproducibility (`--split-map`, `--write-split-map`).
 
 ## Installation
 
@@ -154,19 +155,31 @@ This will display a table showing all audio streams with their properties:
 💡 Use the 'Index' value with --stream to select an audio stream for processing.
 ```
 
-### Using Split and Delay Arguments
+### Processing Audio
 
-You can use `--split`, `--split-range`, and `--initial-delay` together in any combination to define your split points and delays. For example:
+Here is an example of a typical command:
 
 ```sh
 sync-nudger \
     --input "my_video.mkv" \
     --output "my_video_synced.mkv" \
     --stream 6 \
-    --split 177.3:360 \
-    --split-range 850.5:855.1:360 \
-    --initial-delay -50
+    --initial-delay -50 \
+    --split 177.3:360.5 \
+    --split-range 850.5:855.1:360.25 \
+    --bitrate 128k \
+    --yes
 ```
+
+This command will:
+
+* Process the audio stream with index `6` from `my_video.mkv`.
+* Trim `50ms` from the beginning of the audio.
+* Create a split at exactly `177.3` seconds and apply a `360.5ms` delay to the following segment.
+* Find the quietest point between `850.5s` and `855.1s`, create a split there, and apply a `360.25ms` delay to the final segment.
+* Re-encode the final audio to a bitrate of `128k`.
+* Save the result to `my_video_synced.mkv`.
+* Automatically confirm the plan and proceed without prompting (because of `--yes`).
 
 ### Using a Split Map JSON File
 
@@ -176,10 +189,12 @@ You can provide all split points, split ranges, and the initial delay in a singl
 
 ```json
 {
-  "initial_delay": -50,
-  "splits": [[177.3, 360]],
+  "initial_delay": -50.0,
+  "splits": [
+    { "time": 177.3, "delay": 360.5 }
+  ],
   "split_ranges": [
-    { "startTime": 850.5, "endTime": 855.1, "delay": 360 }
+    { "startTime": 850.5, "endTime": 855.1, "delay": 360.25 }
   ]
 }
 ```
@@ -214,9 +229,9 @@ You can save the resolved split points and delays to a JSON file using the `--wr
 
 ```json
 {
-  "initial_delay": 0,
+  "initial_delay": 0.0,
   "splits": [
-    { "time": 100.5, "delay": 200 },
+    { "time": 100.5, "delay": 200.5 },
     { "time": 300.25, "delay": 400 }
   ],
   "split_ranges": []
@@ -227,10 +242,10 @@ You can save the resolved split points and delays to a JSON file using the `--wr
 
 ```json
 {
-  "initial_delay": 0,
+  "initial_delay": 0.0,
   "splits": [],
   "split_ranges": [
-    { "startTime": 100.75, "endTime": 110.5, "delay": 200 },
+    { "startTime": 100.75, "endTime": 110.5, "delay": 200.5 },
     { "startTime": 825.1, "endTime": 832.9, "delay": 400 }
   ]
 }
@@ -240,9 +255,9 @@ You can save the resolved split points and delays to a JSON file using the `--wr
 
 ```json
 {
-  "initial_delay": 0,
+  "initial_delay": 0.0,
   "splits": [
-    { "time": 100.5, "delay": 200 }
+    { "time": 100.5, "delay": 200.5 }
   ],
   "split_ranges": [
     { "startTime": 825.1, "endTime": 832.9, "delay": 400 }
@@ -250,8 +265,18 @@ You can save the resolved split points and delays to a JSON file using the `--wr
 }
 ```
 
-Note: Fractions of seconds are supported for all time fields (`time`, `startTime`, `endTime`).
+Note: All delay fields (`delay` in splits, split_ranges, and `initial_delay`) can be floating point milliseconds (e.g., 200.5). This is supported in both CLI and JSON.
 
 Later, you can reproduce the same operation with:
 
+```sh
+sync-nudger \
+    --input "my_video.mkv" \
+    --output "my_video_synced.mkv" \
+    --stream 6 \
+    --split-map my_video.json
 ```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

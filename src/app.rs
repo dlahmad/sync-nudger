@@ -164,7 +164,7 @@ pub fn run(args: Args) -> Result<()> {
 
     // 2. Resolve split points
     println!("ℹ️ Resolving split points...");
-    let mut all_splits: Vec<(f64, i32, String)> = Vec::new();
+    let mut all_splits: Vec<(f64, f64, String)> = Vec::new();
     let mut initial_delay = args.initial_delay;
 
     if let Some(split_map) = args.load_split_map()? {
@@ -269,7 +269,7 @@ pub fn run(args: Args) -> Result<()> {
             table.add_row(vec![
                 source.clone(),
                 format!("{:.3}", point),
-                format!("{}", delay),
+                format!("{:.3}", delay),
             ]);
         }
 
@@ -294,7 +294,7 @@ pub fn run(args: Args) -> Result<()> {
         };
 
         info_table
-            .add_row(vec!["Initial Delay", &format!("{} ms", initial_delay)])
+            .add_row(vec!["Initial Delay", &format!("{:.3} ms", initial_delay)])
             .add_row(vec!["Stream ID", &format!("#{}", stream)])
             .add_row(vec!["Stream Name", &stream_name])
             .add_row(vec!["Codec", &original_codec])
@@ -307,19 +307,22 @@ pub fn run(args: Args) -> Result<()> {
         println!("\n▶️ Job Details:");
         println!("{info_table}");
 
-        println!("\nProceed with this plan? [y/N]");
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        if !input.trim().eq_ignore_ascii_case("y") {
-            println!("Aborting operation.");
-            fs::remove_dir_all(&tmpdir)?;
-            return Ok(());
+        if args.yes {
+            println!("\n--yes flag provided, proceeding without confirmation.");
+        } else {
+            println!("\nProceed with this plan? [y/N]");
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            if !input.trim().eq_ignore_ascii_case("y") {
+                println!("Aborting operation.");
+                fs::remove_dir_all(&tmpdir)?;
+                return Ok(());
+            }
         }
     }
 
     let mut split_points: Vec<f64> = Vec::new();
-    let mut delays: Vec<i32> = vec![initial_delay];
+    let mut delays: Vec<f64> = vec![initial_delay];
     for (point, delay, _) in &all_splits {
         split_points.push(*point);
         delays.push(*delay);
@@ -372,7 +375,7 @@ pub fn run(args: Args) -> Result<()> {
         run_ffmpeg(&ffmpeg_args, args.debug)?;
 
         let delay = delays[i];
-        let target = if delay > 0 {
+        let target = if delay > 0.0 {
             let delayed = tmpdir.join(format!("part_{}_delayed.flac", i + 1));
             let delay_str = delay.to_string();
             run_ffmpeg(
@@ -390,7 +393,7 @@ pub fn run(args: Args) -> Result<()> {
             )?;
             fs::remove_file(&part)?;
             delayed
-        } else if delay < 0 {
+        } else if delay < 0.0 {
             let trimmed = tmpdir.join(format!("part_{}_trimmed.flac", i + 1));
             let trim_s = (-delay as f64) / 1000.0;
             let trim_s_str = trim_s.to_string();

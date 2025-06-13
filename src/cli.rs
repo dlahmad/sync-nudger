@@ -6,19 +6,20 @@ use serde;
 #[command(author, version, about)]
 pub struct Args {
     /// Input MKV file
-    #[arg(short, long)]
+    #[arg(short = 'i', long)]
     pub input: Option<String>,
 
     /// Output MKV file
-    #[arg(short, long)]
+    #[arg(short = 'o', long)]
     pub output: Option<String>,
 
     /// Audio stream index (e.g. 6)
-    #[arg(short, long)]
+    #[arg(short = 's', long)]
     pub stream: Option<usize>,
 
     /// Path to a JSON file containing split points and delays (conflicts with --split, --split-range, --initial-delay)
     #[arg(
+        short = 'm',
         long = "split-map",
         conflicts_with = "initial_delay",
         conflicts_with = "splits",
@@ -26,30 +27,30 @@ pub struct Args {
     )]
     pub split_map: Option<Option<String>>,
 
-    /// Delay for the first audio segment in ms. (conflicts with --split-map)
-    #[arg(long, default_value_t = 0, conflicts_with = "split_map")]
-    pub initial_delay: i32,
+    /// Delay for the first audio segment in milliseconds (can be fractional, e.g., 200.5). (conflicts with --split-map)
+    #[arg(short = 'd', long, default_value_t = 0.0, conflicts_with = "split_map")]
+    pub initial_delay: f64,
 
     /// Split points and subsequent delays, in format <seconds>:<delay_ms>. (conflicts with --split-map)
     #[arg(short = 'p', long = "split", value_parser = parse_split, num_args = 1.., conflicts_with = "split_map")]
     pub splits: Vec<SplitPoint>,
 
     /// Split ranges and subsequent delays, in format <start_time>:<end_time>:<delay_ms>. (conflicts with --split-map)
-    #[arg(long = "split-range", value_parser = parse_split_range, num_args = 1.., conflicts_with = "split_map")]
+    #[arg(short = 'r', long = "split-range", value_parser = parse_split_range, num_args = 1.., conflicts_with = "split_map")]
     pub split_ranges: Vec<SplitRange>,
 
     /// Output bitrate (e.g. 80k). If not provided, it will be detected automatically.
-    #[arg(short, long)]
+    #[arg(short = 'b', long)]
     pub bitrate: Option<String>,
 
     /// Loudness threshold (in LUFS) to consider a point as audible.
     /// Used to distinguish quiet audio from pure digital silence.
     /// For 16-bit audio, the theoretical dynamic range is 96dB, so -95 is a good default.
-    #[arg(long, default_value_t = -95.0)]
+    #[arg(short = 't', long, default_value_t = -95.0)]
     pub silence_threshold: f64,
 
     /// Show ffmpeg logs.
-    #[arg(long)]
+    #[arg(short = 'g', long)]
     pub debug: bool,
 
     /// Ignore ffmpeg version check.
@@ -57,22 +58,27 @@ pub struct Args {
     pub ignore_ffmpeg_version: bool,
 
     /// Check FFmpeg installation and version compatibility.
-    #[arg(long)]
+    #[arg(short = 'c', long)]
     pub check_ffmpeg: bool,
 
     /// Inspect input file and show all audio streams in a table
-    #[arg(long)]
+    #[arg(short = 'I', long)]
     pub inspect: bool,
 
     /// Write the resolved split map (after all split points and delays are determined) to this file as JSON. If no file is provided, the input file name (without extension) will be used with .json.
-    #[arg(long = "write-split-map", num_args = 0..=1, value_name = "FILE")]
+    #[arg(short = 'w', long = "write-split-map", num_args = 0..=1, value_name = "FILE")]
     pub write_split_map: Option<Option<String>>,
+
+    /// Automatically confirm the splitting plan and proceed without prompting
+    #[arg(short = 'y', long = "yes")]
+    pub yes: bool,
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct SplitPoint {
     pub time: f64,
-    pub delay: i32,
+    /// Delay in milliseconds (can be fractional, e.g., 200.5)
+    pub delay: f64,
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
@@ -81,13 +87,14 @@ pub struct SplitRange {
     pub start: f64,
     #[serde(rename = "endTime")]
     pub end: f64,
-    pub delay: i32,
+    /// Delay in milliseconds (can be fractional, e.g., 200.5)
+    pub delay: f64,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, Default)]
 pub struct SplitMap {
     #[serde(default)]
-    pub initial_delay: Option<i32>,
+    pub initial_delay: Option<f64>,
     #[serde(default)]
     pub splits: Vec<SplitPoint>,
     #[serde(default)]
