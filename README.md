@@ -171,110 +171,61 @@ sync-nudger \
     --yes
 ```
 
-This command will:
+#### Full CLI Options
 
-* Process the audio stream with index `6` from `my_video.mkv`.
-* Trim `50ms` from the beginning of the audio.
-* Create a split at exactly `177.3` seconds and apply a `360.5ms` delay to the following segment.
-* Find the quietest point between `850.5s` and `855.1s`, create a split there, and apply a `360.25ms` delay to the final segment.
-* Re-encode the final audio to a bitrate of `128k`.
-* Save the result to `my_video_synced.mkv`.
-* Automatically confirm the plan and proceed without prompting (because of `--yes`).
+| Short | Long                | Description                                                                                 |
+|-------|---------------------|---------------------------------------------------------------------------------------------|
+| -i    | --input             | Input MKV file                                                                              |
+| -o    | --output            | Output MKV file                                                                             |
+| -s    | --stream            | Audio stream index (e.g. 6)                                                                  |
+| -t    | --task              | Path to a JSON file describing the full task (input, output, stream, splits, delays, etc).   |
+| -d    | --initial-delay     | Delay for the first audio segment in milliseconds (can be fractional, e.g., 200.5)           |
+| -p    | --split             | Split points and subsequent delays, in format <seconds>:<delay_ms>                           |
+| -r    | --split-range       | Split ranges and subsequent delays, in format <start_time>:<end_time>:<delay_ms>             |
+| -b    | --bitrate           | Output bitrate (e.g. 80k). If not provided, it will be detected automatically.               |
+| -T    | --silence-threshold | Loudness threshold (in LUFS) to consider a point as audible. Default: -95.0                  |
+| -g    | --debug             | Show ffmpeg logs                                                                             |
+|       | --ignore-ffmpeg-version | Ignore ffmpeg version check                                                             |
+| -c    | --check-ffmpeg      | Check FFmpeg installation and version compatibility                                          |
+| -I    | --inspect           | Inspect input file and show all audio streams in a table                                     |
+| -w    | --write-split-map   | Write the resolved split map to this file as JSON                                            |
+| -y    | --yes               | Automatically confirm the splitting plan and proceed without prompting                       |
 
-### Using a Split Map JSON File
+### Using a Task JSON File
 
-You can provide all split points, split ranges, and the initial delay in a single JSON file using the `--split-map` flag. **This is exclusive:** you cannot use `--split-map` together with `--split`, `--split-range`, or `--initial-delay`.
+You can provide all split points, split ranges, and the initial delay in a single JSON file using the `--task` flag. CLI arguments override values in the task file.
 
-**Example JSON file (`splits.json`):**
+**Note:** Task files do **not** need to contain all parameters. You can include only the fields you want to specify; any missing fields will use their default values or can be provided/overridden via CLI arguments. This allows for minimal or partial task files.
+
+**Example JSON file (`task.json`):**
 
 ```json
 {
+  "input": "my_video.mkv",
+  "output": "my_video_synced.mkv",
+  "stream": 6,
   "initial_delay": -50.0,
   "splits": [
     { "time": 177.3, "delay": 360.5 }
   ],
   "split_ranges": [
     { "startTime": 850.5, "endTime": 855.1, "delay": 360.25 }
-  ]
+  ],
+  "bitrate": "128k",
+  "silence_threshold": -95.0
 }
 ```
 
-**Usage:**
+You can run:
 
 ```sh
-sync-nudger \
-    --input "my_video.mkv" \
-    --output "my_video_synced.mkv" \
-    --stream 6 \
-    --split-map splits.json
+sync-nudger -t task.json -y
 ```
 
-### Saving a Split Map for Reproducibility
-
-You can save the resolved split points and delays to a JSON file using the `--write-split-map` option. This allows you to reproduce the same operation later using `--split-map`.
-
-* If you use `--write-split-map` **with a filename**, that file will be used.
-* If you use `--write-split-map` **as a flag with no filename**, the output file will be the input file name (without extension) plus `.json`.
-
-**What gets saved:**
-
-* If you provide `--split`, only those split points will be saved in the JSON.
-* If you provide `--split-range`, only the original ranges will be saved in the JSON (not the derived split points).
-* If you provide both, both will be present in the JSON.
-* The split map is a faithful record of your input arguments, not the resolved plan.
-
-**Examples:**
-
-*Only split points:*
-
-```json
-{
-  "initial_delay": 0.0,
-  "splits": [
-    { "time": 100.5, "delay": 200.5 },
-    { "time": 300.25, "delay": 400 }
-  ],
-  "split_ranges": []
-}
-```
-
-*Only split ranges:*
-
-```json
-{
-  "initial_delay": 0.0,
-  "splits": [],
-  "split_ranges": [
-    { "startTime": 100.75, "endTime": 110.5, "delay": 200.5 },
-    { "startTime": 825.1, "endTime": 832.9, "delay": 400 }
-  ]
-}
-```
-
-*Both:*
-
-```json
-{
-  "initial_delay": 0.0,
-  "splits": [
-    { "time": 100.5, "delay": 200.5 }
-  ],
-  "split_ranges": [
-    { "startTime": 825.1, "endTime": 832.9, "delay": 400 }
-  ]
-}
-```
-
-Note: All delay fields (`delay` in splits, split_ranges, and `initial_delay`) can be floating point milliseconds (e.g., 200.5). This is supported in both CLI and JSON.
-
-Later, you can reproduce the same operation with:
+Or override any value from the task file on the CLI:
 
 ```sh
-sync-nudger \
-    --input "my_video.mkv" \
-    --output "my_video_synced.mkv" \
-    --stream 6 \
-    --split-map my_video.json
+sync-nudger -t task.json -o new_output.mkv -y
 ```
 
 ## License

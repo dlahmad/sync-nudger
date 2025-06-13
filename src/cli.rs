@@ -5,11 +5,11 @@ use serde;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
-    /// Input MKV file
+    /// Input media file (video or audio, any FFmpeg-supported format)
     #[arg(short = 'i', long)]
     pub input: Option<String>,
 
-    /// Output MKV file
+    /// Output media file (any FFmpeg-supported format)
     #[arg(short = 'o', long)]
     pub output: Option<String>,
 
@@ -17,15 +17,9 @@ pub struct Args {
     #[arg(short = 's', long)]
     pub stream: Option<usize>,
 
-    /// Path to a JSON file containing split points and delays (conflicts with --split, --split-range, --initial-delay)
-    #[arg(
-        short = 'm',
-        long = "split-map",
-        conflicts_with = "initial_delay",
-        conflicts_with = "splits",
-        conflicts_with = "split_ranges"
-    )]
-    pub split_map: Option<Option<String>>,
+    /// Path to a JSON file describing the full task (input, output, stream, splits, delays, etc). CLI arguments override values in the task file.
+    #[arg(short = 't', long = "task")]
+    pub task: Option<Option<String>>,
 
     /// Delay for the first audio segment in milliseconds (can be fractional, e.g., 200.5). (conflicts with --split-map)
     #[arg(short = 'd', long, default_value_t = 0.0, conflicts_with = "split_map")]
@@ -46,7 +40,7 @@ pub struct Args {
     /// Loudness threshold (in LUFS) to consider a point as audible.
     /// Used to distinguish quiet audio from pure digital silence.
     /// For 16-bit audio, the theoretical dynamic range is 96dB, so -95 is a good default.
-    #[arg(short = 't', long, default_value_t = -95.0)]
+    #[arg(short = 'T', long, default_value_t = -95.0)]
     pub silence_threshold: f64,
 
     /// Show ffmpeg logs.
@@ -92,13 +86,19 @@ pub struct SplitRange {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, Default)]
-pub struct SplitMap {
-    #[serde(default)]
+pub struct Task {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    pub stream: Option<usize>,
     pub initial_delay: Option<f64>,
     #[serde(default)]
     pub splits: Vec<SplitPoint>,
     #[serde(default)]
     pub split_ranges: Vec<SplitRange>,
+    pub bitrate: Option<String>,
+    pub silence_threshold: Option<f64>,
 }
 
 fn parse_split(s: &str) -> Result<SplitPoint, String> {
@@ -138,12 +138,12 @@ fn parse_split_range(s: &str) -> Result<SplitRange, String> {
 }
 
 impl Args {
-    pub fn load_split_map(&self) -> anyhow::Result<Option<SplitMap>> {
-        match &self.split_map {
+    pub fn load_task(&self) -> anyhow::Result<Option<Task>> {
+        match &self.task {
             Some(Some(path)) => {
                 let contents = std::fs::read_to_string(path)?;
-                let split_map: SplitMap = serde_json::from_str(&contents)?;
-                Ok(Some(split_map))
+                let task: Task = serde_json::from_str(&contents)?;
+                Ok(Some(task))
             }
             Some(None) | None => Ok(None),
         }

@@ -31,21 +31,53 @@ pub fn run(args: Args) -> Result<()> {
         return handle_inspect(input);
     }
 
-    // Validate required arguments for normal operation
+    // Load task file if provided and merge with CLI args
+    let task = args.load_task()?;
     let input = args
         .input
         .as_ref()
+        .or_else(|| task.as_ref().and_then(|t| t.input.as_ref()))
         .ok_or_else(|| anyhow::anyhow!("--input is required"))?;
     let output = args
         .output
         .as_ref()
+        .or_else(|| task.as_ref().and_then(|t| t.output.as_ref()))
         .ok_or_else(|| anyhow::anyhow!("--output is required"))?;
     if input == output {
         bail!("Input and output file cannot be the same.");
     }
     let stream = args
         .stream
+        .or_else(|| task.as_ref().and_then(|t| t.stream))
         .ok_or_else(|| anyhow::anyhow!("--stream is required"))?;
+    let initial_delay = if args.initial_delay != 0.0 {
+        args.initial_delay
+    } else {
+        task.as_ref().and_then(|t| t.initial_delay).unwrap_or(0.0)
+    };
+    let bitrate = args
+        .bitrate
+        .clone()
+        .or_else(|| task.as_ref().and_then(|t| t.bitrate.clone()));
+    let silence_threshold = if args.silence_threshold != -95.0 {
+        args.silence_threshold
+    } else {
+        task.as_ref()
+            .and_then(|t| t.silence_threshold)
+            .unwrap_or(-95.0)
+    };
+    let splits = if !args.splits.is_empty() {
+        args.splits.clone()
+    } else {
+        task.as_ref().map(|t| t.splits.clone()).unwrap_or_default()
+    };
+    let split_ranges = if !args.split_ranges.is_empty() {
+        args.split_ranges.clone()
+    } else {
+        task.as_ref()
+            .map(|t| t.split_ranges.clone())
+            .unwrap_or_default()
+    };
 
     check_ffmpeg_version(args.ignore_ffmpeg_version)?;
     check_dependency("ffprobe")?;
@@ -128,7 +160,7 @@ pub fn run(args: Args) -> Result<()> {
         .to_owned();
 
     // Determine bitrate
-    let bitrate = if let Some(b) = args.bitrate.clone() {
+    let bitrate = if let Some(b) = bitrate {
         println!("ℹ️ Using user-provided bitrate: {}", b);
         b
     } else {
@@ -165,16 +197,13 @@ pub fn run(args: Args) -> Result<()> {
     // 2. Resolve split points
     println!("ℹ️ Resolving split points...");
     let mut all_splits: Vec<(f64, f64, String)> = Vec::new();
-    let mut initial_delay = args.initial_delay;
-
-    if let Some(split_map) = args.load_split_map()? {
-        if let Some(id) = split_map.initial_delay {
-            initial_delay = id;
-        }
-        for split in split_map.splits {
+    if !splits.is_empty() {
+        for split in &splits {
             all_splits.push((split.time, split.delay, format!("{:.3}", split.time)));
         }
-        for range in split_map.split_ranges {
+    }
+    if !split_ranges.is_empty() {
+        for range in &split_ranges {
             println!(
                 "ℹ️ Finding quietest point in range {:.3}s - {:.3}s",
                 range.start, range.end
@@ -183,7 +212,7 @@ pub fn run(args: Args) -> Result<()> {
                 &flac_path,
                 range.start,
                 range.end,
-                args.silence_threshold,
+                silence_threshold,
                 args.debug,
             )?;
             if let Some(debug_output) = &result.debug_output {
@@ -199,43 +228,10 @@ pub fn run(args: Args) -> Result<()> {
                 format!("{:.3}-{:.3}", range.start, range.end),
             ));
         }
-    } else {
-        if !args.splits.is_empty() {
-            for split in &args.splits {
-                all_splits.push((split.time, split.delay, format!("{:.3}", split.time)));
-            }
-        }
-        if !args.split_ranges.is_empty() {
-            for range in &args.split_ranges {
-                println!(
-                    "ℹ️ Finding quietest point in range {:.3}s - {:.3}s",
-                    range.start, range.end
-                );
-                let result = find_quietest_point(
-                    &flac_path,
-                    range.start,
-                    range.end,
-                    args.silence_threshold,
-                    args.debug,
-                )?;
-                if let Some(debug_output) = &result.debug_output {
-                    eprintln!("{}", debug_output);
-                }
-                println!(
-                    "  ✅ Found quietest point at {:.3}s (Loudness: {:.2} LUFS)",
-                    result.time, result.loudness
-                );
-                all_splits.push((
-                    result.time,
-                    range.delay,
-                    format!("{:.3}-{:.3}", range.start, range.end),
-                ));
-            }
-        }
     }
     all_splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    // Optionally write the split map to a file
+    // Optionally write the task to a file
     if let Some(write_split_map) = &args.write_split_map {
         let out_path = if let Some(path) = write_split_map {
             path.clone()
@@ -247,15 +243,20 @@ pub fn run(args: Args) -> Result<()> {
             out.set_extension("json");
             out.to_string_lossy().to_string()
         };
-        let split_map = crate::cli::SplitMap {
+        let task = crate::cli::Task {
+            input: Some(input.to_string()),
+            output: Some(output.to_string()),
+            stream: Some(stream),
             initial_delay: Some(initial_delay),
-            splits: args.splits.clone(),
-            split_ranges: args.split_ranges.clone(),
+            splits: splits.clone(),
+            split_ranges: split_ranges.clone(),
+            bitrate: Some(bitrate.clone()),
+            silence_threshold: Some(silence_threshold),
         };
-        let json = serde_json::to_string_pretty(&split_map)?;
+        let json = serde_json::to_string_pretty(&task)?;
         let mut file = fs::File::create(&out_path)?;
         file.write_all(json.as_bytes())?;
-        println!("✅ Wrote split map to {}", out_path);
+        println!("✅ Wrote task to {}", out_path);
     }
 
     // --- User Confirmation ---
@@ -298,10 +299,16 @@ pub fn run(args: Args) -> Result<()> {
             .add_row(vec!["Stream ID", &format!("#{}", stream)])
             .add_row(vec!["Stream Name", &stream_name])
             .add_row(vec!["Codec", &original_codec])
-            .add_row(vec!["Bitrate", &bitrate])
+            .add_row(vec![
+                "Bitrate",
+                args.bitrate
+                    .as_deref()
+                    .or_else(|| task.as_ref().and_then(|t| t.bitrate.as_deref()))
+                    .unwrap_or(""),
+            ])
             .add_row(vec![
                 "Silence Threshold",
-                &format!("{:.1} LUFS", args.silence_threshold),
+                &format!("{:.1} LUFS", silence_threshold),
             ]);
 
         println!("\n▶️ Job Details:");
