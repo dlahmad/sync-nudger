@@ -136,6 +136,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
-          files: ${{ github.workspace }}/artifacts/**/*
+          files: |
+            ${{ github.workspace }}/artifacts/*/*.tar.gz
+            ${{ github.workspace }}/artifacts/*/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
