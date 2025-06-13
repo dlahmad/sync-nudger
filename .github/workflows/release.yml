@@ -132,14 +132,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Gather all release files
+        run: |
+          mkdir -p release-files
+          find ${{ github.workspace }}/artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release-files/ \;
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
-          files: |
-            ${{ github.workspace }}/artifacts/*/*.tar.gz
-            ${{ github.workspace }}/artifacts/*/*.zip
+          files: release-files/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
