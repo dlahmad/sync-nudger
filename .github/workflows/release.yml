@@ -119,23 +119,21 @@ jobs:
     needs: build-and-upload
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ${{ github.workspace }}/artifacts
+          path: ./artifacts
 
       - name: List all files in artifacts
-        run: |
-          echo "Listing all files and directories in ${{ github.workspace }}/artifacts:"
-          find ${{ github.workspace }}/artifacts -print
-
-      - name: Checkout
-        uses: actions/checkout@v4
+        run: find ./artifacts -print
 
       - name: Gather all release files
         run: |
           mkdir -p release-files
-          find ${{ github.workspace }}/artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release-files/ \;
+          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release-files/ \;
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
