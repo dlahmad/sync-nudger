@@ -70,6 +70,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Set up Cargo cross-linker config
+        shell: bash
         run: |
           mkdir -p .cargo
           cat <<EOF > .cargo/config.toml
