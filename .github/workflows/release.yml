@@ -105,13 +105,14 @@ jobs:
             echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
           fi
 
-      - name: Upload artifact
+      - name: Upload archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
+          name: sync-nudger-${{ env.VERSION }}-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.zip' || '.tar.gz' }}
           path: |
             *.zip
             *.tar.gz
+          if-no-files-found: error
 
   release:
     name: Create GitHub Release
