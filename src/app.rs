@@ -1,7 +1,7 @@
 use crate::{
     cli::Args,
     ffmpeg::{
-        check_and_display_ffmpeg, check_dependency, check_ffmpeg_version, find_quietest_point,
+        check_dependency, check_ffmpeg_installation, check_ffmpeg_version, find_quietest_point,
         get_stream_bitrate_for_processing, inspect_audio_streams, run_ffmpeg,
     },
 };
@@ -17,7 +17,7 @@ use std::{
 pub fn run(args: Args) -> Result<()> {
     // Handle --check-ffmpeg command
     if args.check_ffmpeg {
-        return check_and_display_ffmpeg();
+        return handle_ffmpeg_check();
     }
 
     // Handle --inspect command
@@ -26,46 +26,7 @@ pub fn run(args: Args) -> Result<()> {
             .input
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--input is required for inspection"))?;
-
-        println!("🔍 Inspecting audio streams in: {}\n", input);
-
-        let streams = inspect_audio_streams(input)?;
-
-        if streams.is_empty() {
-            println!("❌ No audio streams found in the input file.");
-            return Ok(());
-        }
-
-        let mut table = Table::new();
-        table.load_preset(UTF8_FULL);
-        table.set_header(vec![
-            "Index",
-            "Codec",
-            "Channels",
-            "Sample Rate",
-            "Bitrate",
-            "Language",
-            "Title",
-        ]);
-
-        for stream in streams {
-            table.add_row(vec![
-                stream.index.to_string(),
-                stream.codec,
-                stream.channels,
-                stream.sample_rate,
-                stream.bitrate,
-                stream.language,
-                stream.title,
-            ]);
-        }
-
-        println!("{}", table);
-        println!(
-            "\n💡 Use the 'Index' value with --stream to select an audio stream for processing."
-        );
-
-        return Ok(());
+        return handle_inspect(input);
     }
 
     // Validate required arguments for normal operation
@@ -209,15 +170,29 @@ pub fn run(args: Args) -> Result<()> {
 
     if !args.split_ranges.is_empty() {
         for range in &args.split_ranges {
-            let point = find_quietest_point(
+            println!(
+                "ℹ️ Finding quietest point in range {:.3}s - {:.3}s",
+                range.start, range.end
+            );
+            let result = find_quietest_point(
                 &flac_path,
                 range.start,
                 range.end,
                 args.silence_threshold,
                 args.debug,
             )?;
+
+            // Display debug output if available
+            if let Some(debug_output) = &result.debug_output {
+                eprintln!("{}", debug_output);
+            }
+
+            println!(
+                "  ✅ Found quietest point at {:.3}s (Loudness: {:.2} LUFS)",
+                result.time, result.loudness
+            );
             all_splits.push((
-                point,
+                result.time,
                 range.delay,
                 format!("{:.3}-{:.3}", range.start, range.end),
             ));
@@ -487,5 +462,103 @@ pub fn run(args: Args) -> Result<()> {
     fs::remove_dir_all(&tmpdir)?;
 
     println!("✅ Processing complete! Output: {}", output);
+    Ok(())
+}
+
+fn handle_ffmpeg_check() -> Result<()> {
+    println!("🔍 Checking FFmpeg installation...\n");
+
+    let check_result = check_ffmpeg_installation();
+
+    // Display FFmpeg status
+    if check_result.ffmpeg_available {
+        if let Some(version_info) = &check_result.ffmpeg_version {
+            println!("✅ FFmpeg found:");
+            println!(
+                "   Version: {}.{}.{}",
+                version_info.major, version_info.minor, version_info.patch
+            );
+
+            if version_info.is_compatible {
+                println!("   Status: ✅ Compatible (minimum required: 4.0.0)");
+            } else {
+                println!("   Status: ❌ Too old (minimum required: 4.0.0)");
+            }
+
+            if version_info.is_tested_version {
+                println!("   Note: This is the tested version");
+            } else {
+                println!("   Note: Tested with version 7.1.x");
+            }
+        } else {
+            println!("⚠️  Could not parse FFmpeg version from output");
+        }
+    } else if let Some(error) = &check_result.error {
+        println!("❌ FFmpeg not found in PATH");
+        println!("   Please install FFmpeg and ensure it's accessible from the command line");
+        bail!("FFmpeg is required but not installed: {}", error);
+    }
+
+    println!();
+
+    // Display FFprobe status
+    if check_result.ffprobe_available {
+        println!("✅ FFprobe found and working");
+    } else {
+        println!("❌ FFprobe not found in PATH");
+        bail!("FFprobe is required but not installed");
+    }
+
+    println!();
+
+    // Display filter availability
+    if check_result.ebur128_filter_available {
+        println!("✅ Required filter 'ebur128' is available");
+    } else {
+        println!("❌ Required filter 'ebur128' not found");
+        println!("   This filter is needed for loudness analysis");
+    }
+
+    println!("\n🎉 FFmpeg check complete!");
+    Ok(())
+}
+
+fn handle_inspect(input: &str) -> Result<()> {
+    println!("🔍 Inspecting audio streams in: {}\n", input);
+
+    let streams = inspect_audio_streams(input)?;
+
+    if streams.is_empty() {
+        println!("❌ No audio streams found in the input file.");
+        return Ok(());
+    }
+
+    let mut table = Table::new();
+    table.load_preset(UTF8_FULL);
+    table.set_header(vec![
+        "Index",
+        "Codec",
+        "Channels",
+        "Sample Rate",
+        "Bitrate",
+        "Language",
+        "Title",
+    ]);
+
+    for stream in streams {
+        table.add_row(vec![
+            stream.index.to_string(),
+            stream.codec,
+            stream.channels,
+            stream.sample_rate,
+            stream.bitrate,
+            stream.language,
+            stream.title,
+        ]);
+    }
+
+    println!("{}", table);
+    println!("\n💡 Use the 'Index' value with --stream to select an audio stream for processing.");
+
     Ok(())
 }

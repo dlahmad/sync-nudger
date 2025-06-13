@@ -178,6 +178,10 @@ This command will:
 * Re-encode the final audio to a bitrate of `128k`.
 * Save the result to `my_video_synced.mkv`.
 
+## Disclosure
+
+This project is being created with the help of AI. Specifically cursor is the main AI tooing involved.
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
