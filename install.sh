@@ -15,18 +15,32 @@ ARCH=$(uname -m)
 case "$ARCH" in
     x86_64) ARCH="x86_64" ;;
     arm64|aarch64) ARCH="aarch64" ;;
+    armv7l|armv7) ARCH="armv7" ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
 # Compose download URL
-if [ "$OS" = "darwin" ]; then
-    FILE="$BINARY-${VERSION}-x86_64-apple-darwin.tar.gz"
-    elif [ "$OS" = "linux" ]; then
-    FILE="$BINARY-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
-else
-    echo "Unsupported OS: $OS"
-    exit 1
-fi
+case "$OS" in
+    darwin)
+        case "$ARCH" in
+            x86_64) FILE="$BINARY-${VERSION}-x86_64-apple-darwin.tar.gz" ;;
+            aarch64) FILE="$BINARY-${VERSION}-aarch64-apple-darwin.tar.gz" ;;
+            *) echo "Unsupported architecture: $ARCH for macOS"; exit 1 ;;
+        esac
+    ;;
+    linux)
+        case "$ARCH" in
+            x86_64) FILE="$BINARY-${VERSION}-x86_64-unknown-linux-musl.tar.gz" ;;
+            aarch64) FILE="$BINARY-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" ;;
+            armv7l|armv7) FILE="$BINARY-${VERSION}-armv7-unknown-linux-gnueabihf.tar.gz" ;;
+            *) echo "Unsupported architecture: $ARCH for Linux"; exit 1 ;;
+        esac
+    ;;
+    *)
+        echo "Unsupported OS: $OS"
+        exit 1
+    ;;
+esac
 
 URL="https://github.com/$REPO/releases/download/$VERSION/$FILE"
 
