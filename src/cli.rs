@@ -59,9 +59,9 @@ pub struct Args {
     #[arg(short = 'I', long)]
     pub inspect: bool,
 
-    /// Write the resolved split map (after all split points and delays are determined) to this file as JSON. If no file is provided, the input file name (without extension) will be used with .json.
-    #[arg(short = 'w', long = "write-split-map", num_args = 0..=1, value_name = "FILE")]
-    pub write_split_map: Option<Option<String>>,
+    /// Write the resolved task (after all split points and delays are determined) to this file as JSON. If no file is provided, the input file name (without extension) will be used with .json.
+    #[arg(short = 'w', long = "write-task-file", num_args = 0..=1, value_name = "FILE")]
+    pub write_task_file: Option<Option<String>>,
 
     /// Automatically confirm the splitting plan and proceed without prompting
     #[arg(short = 'y', long = "yes")]

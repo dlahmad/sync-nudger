@@ -232,14 +232,13 @@ pub fn run(args: Args) -> Result<()> {
     all_splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     // Optionally write the task to a file
-    if let Some(write_split_map) = &args.write_split_map {
-        let out_path = if let Some(path) = write_split_map {
-            path.clone()
+    if let Some(write_task_file) = &args.write_task_file {
+        let out_path = if let Some(path) = write_task_file {
+            path.clone().to_string()
         } else {
-            // Use input file name without extension + .json
+            // Use input file path with extension replaced by .json
             let input_path = std::path::Path::new(input);
-            let stem = input_path.file_stem().unwrap_or_default();
-            let mut out = std::path::PathBuf::from(stem);
+            let mut out = input_path.to_path_buf();
             out.set_extension("json");
             out.to_string_lossy().to_string()
         };
