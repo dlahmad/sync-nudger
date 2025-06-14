@@ -40,7 +40,7 @@ The tool performs a series of operations to achieve its goal:
 You can install the latest release of Sync-Nudger with a single command:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dlahmad/sync-nudger/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dlahmad/sync-nudger/refs/heads/master/install.sh | bash
 ```
 
 This script automatically detects your OS and architecture, downloads the latest release from GitHub, and installs the binary to `/usr/local/bin`.
