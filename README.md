@@ -35,6 +35,16 @@ The tool performs a series of operations to achieve its goal:
 
 ## Installation
 
+### Quick Install (Linux/macOS)
+
+You can install the latest release of Sync-Nudger with a single command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dlahmad/sync-nudger/master/install.sh | bash
+```
+
+This script automatically detects your OS and architecture, downloads the latest release from GitHub, and installs the binary to `/usr/local/bin`.
+
 ### Prerequisites
 
 You must have **`ffmpeg`** and **`ffprobe`** installed and available in your system's `PATH`. These tools are essential for all audio and video processing.
