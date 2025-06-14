@@ -1,13 +1,11 @@
 # Release Notes
 
-## 0.3.0
+## 0.3.1
 
 ### Features Added
 
-* Add `--yes` confirmation flag for non-interactive runs
-* Support floating point (fractional millisecond) delays for splits, split-ranges, and initial delay
-* Improved split-map support (JSON, CLI, and reproducibility)
-* New CLI short flags: `--task` (`-t`), `--silence-threshold` (`-T`)
-* CLI arguments always override values in the task file
+### Bugs Fixed
 
-**Full Changelog**: [0.2.2...0.3.0](https://github.com/dlahmad/sync-nudger/compare/0.2.2...0.3.0)
+* Bitrate is empty in status table if not set by cli parameter
+
+**Full Changelog**: [0.3.0...0.3.1](https://github.com/dlahmad/sync-nudger/compare/0.3.0...0.3.1)

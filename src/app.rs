@@ -299,13 +299,7 @@ pub fn run(args: Args) -> Result<()> {
             .add_row(vec!["Stream ID", &format!("#{}", stream)])
             .add_row(vec!["Stream Name", &stream_name])
             .add_row(vec!["Codec", &original_codec])
-            .add_row(vec![
-                "Bitrate",
-                args.bitrate
-                    .as_deref()
-                    .or_else(|| task.as_ref().and_then(|t| t.bitrate.as_deref()))
-                    .unwrap_or(""),
-            ])
+            .add_row(vec!["Bitrate", &bitrate])
             .add_row(vec![
                 "Silence Threshold",
                 &format!("{:.1} LUFS", silence_threshold),
