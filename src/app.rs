@@ -260,6 +260,13 @@ pub fn run(args: Args) -> Result<()> {
 
     // --- User Confirmation ---
     if !all_splits.is_empty() {
+        // Get audio duration for the selected stream
+        let audio_duration = match crate::ffmpeg::get_audio_stream_duration(input, stream) {
+            Ok(Some(dur)) => format!("{:.3} s", dur),
+            Ok(None) => "unknown".to_string(),
+            Err(_) => "unknown".to_string(),
+        };
+
         let mut table = Table::new();
         table
             .set_header(vec!["Source", "Resolved Split (s)", "Delay (ms)"])
@@ -283,7 +290,8 @@ pub fn run(args: Args) -> Result<()> {
 
         info_table
             .add_row(vec!["Input File", input])
-            .add_row(vec!["Output File", output]);
+            .add_row(vec!["Output File", output])
+            .add_row(vec!["Audio Duration", &audio_duration]);
 
         let stream_name = if !original_title.is_empty() {
             original_title.clone()
