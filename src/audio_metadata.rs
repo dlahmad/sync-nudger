@@ -30,10 +30,12 @@ pub fn probe_audio_stream(input: &str, stream: usize) -> Result<AudioStreamMetad
     for line in streams_info.lines() {
         let parts: Vec<_> = line.split(',').collect();
         if parts.len() >= 3 && parts[2] == "audio" {
-            if parts[0].parse::<usize>().unwrap() == stream {
-                audio_stream_idx = audio_count;
-                original_codec = parts[1].to_string();
-                break;
+            if let Ok(id) = parts[0].parse::<usize>() {
+                if id == stream {
+                    audio_stream_idx = audio_count;
+                    original_codec = parts[1].to_string();
+                    break;
+                }
             }
             audio_count += 1;
         }

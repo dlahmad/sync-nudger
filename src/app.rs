@@ -3,6 +3,7 @@ use crate::audio_processing::{
     concat_audio_segments, convert_audio_codec, extract_audio_stream_to_flac, fit_audio_to_length,
     remux_audio_stream, split_and_delay_audio,
 };
+use crate::util::path_to_str;
 use crate::{
     cli::Args,
     ffmpeg::{
@@ -162,7 +163,8 @@ pub fn run(args: Args) -> Result<()> {
             ));
         }
     }
-    all_splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    all_splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
     // --- User Confirmation ---
     if !all_splits.is_empty() {
@@ -299,7 +301,7 @@ pub fn run(args: Args) -> Result<()> {
         if let Ok(Some(orig_duration)) = get_audio_stream_duration(input, stream) {
             orig_duration_val = Some(orig_duration);
             // Get duration of the processed audio
-            let processed_duration = get_file_duration(final_flac.to_str().unwrap())?;
+            let processed_duration = get_file_duration(path_to_str(final_flac.as_path())?)?;
             processed_duration_val = Some(processed_duration);
             let fitted_path = tmpdir.join("target_audio_final_fitted.flac");
             fit_audio_to_length(
@@ -310,7 +312,7 @@ pub fn run(args: Args) -> Result<()> {
             )?;
             fitted_flac = fitted_path;
             // Get duration of the adjusted audio
-            let adjusted_duration = get_file_duration(fitted_flac.to_str().unwrap())?;
+            let adjusted_duration = get_file_duration(path_to_str(fitted_flac.as_path())?)?;
             adjusted_duration_val = Some(adjusted_duration);
         }
     }

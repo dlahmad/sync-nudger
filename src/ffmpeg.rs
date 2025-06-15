@@ -113,8 +113,16 @@ pub fn check_ffmpeg_version(ignore_check: bool) -> Result<(), FFmpegError> {
     let re = Regex::new(r"ffmpeg version (\d+)\.(\d+)")?;
 
     if let Some(caps) = re.captures(&version_info) {
-        let major: u32 = caps.get(1).unwrap().as_str().parse()?;
-        let minor: u32 = caps.get(2).unwrap().as_str().parse()?;
+        let major: u32 = caps
+            .get(1)
+            .ok_or(FFmpegError::VersionParseError)?
+            .as_str()
+            .parse()?;
+        let minor: u32 = caps
+            .get(2)
+            .ok_or(FFmpegError::VersionParseError)?
+            .as_str()
+            .parse()?;
 
         if major == EXPECTED_FFMPEG_MAJOR_VERSION && minor == EXPECTED_FFMPEG_MINOR_VERSION {
             Ok(())
@@ -157,10 +165,16 @@ pub fn find_quietest_point(
     debug: bool,
 ) -> Result<QuietestPointResult, FFmpegError> {
     let duration = end - start;
+    let audio_path_str = audio_path.to_str().ok_or_else(|| {
+        FFmpegError::CommandFailed(
+            "find_quietest_point".to_string(),
+            "Invalid audio path".to_string(),
+        )
+    })?;
     let output = Command::new("ffmpeg")
         .args(&[
             "-i",
-            audio_path.to_str().unwrap(),
+            audio_path_str,
             "-ss",
             &start.to_string(),
             "-t",
@@ -246,8 +260,14 @@ pub fn check_ffmpeg_installation() -> FFmpegCheckResult {
                 let re = Regex::new(r"ffmpeg version (\d+)\.(\d+)(?:\.(\d+))?").unwrap();
 
                 if let Some(caps) = re.captures(&version_info) {
-                    let major: u32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
-                    let minor: u32 = caps.get(2).unwrap().as_str().parse().unwrap_or(0);
+                    let major: u32 = caps
+                        .get(1)
+                        .and_then(|m| m.as_str().parse().ok())
+                        .unwrap_or(0);
+                    let minor: u32 = caps
+                        .get(2)
+                        .and_then(|m| m.as_str().parse().ok())
+                        .unwrap_or(0);
                     let patch: u32 = caps.get(3).map_or(0, |m| m.as_str().parse().unwrap_or(0));
 
                     result.ffmpeg_version = Some(FFmpegVersionInfo {

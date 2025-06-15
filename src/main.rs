@@ -4,6 +4,7 @@ mod audio_processing;
 mod cli;
 mod ffmpeg;
 mod task;
+mod util;
 
 use anyhow::Result;
 use clap::Parser;

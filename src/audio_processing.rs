@@ -4,6 +4,12 @@ use anyhow::Result;
 use std::path::Path;
 use std::path::PathBuf;
 
+/// Helper to convert a Path to &str, returning an error if not valid UTF-8.
+fn path_to_str(path: &Path) -> anyhow::Result<&str> {
+    path.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid path (not UTF-8)"))
+}
+
 /// Extract a specific audio stream from a media file to a FLAC file using ffmpeg.
 pub fn extract_audio_stream_to_flac(
     input: &str,
@@ -11,6 +17,7 @@ pub fn extract_audio_stream_to_flac(
     output_path: &std::path::Path,
     debug: bool,
 ) -> anyhow::Result<()> {
+    let output_path_str = path_to_str(output_path)?;
     crate::ffmpeg::run_ffmpeg(
         &[
             "-y",
@@ -20,7 +27,7 @@ pub fn extract_audio_stream_to_flac(
             &format!("0:{}", stream),
             "-c:a",
             "flac",
-            output_path.to_str().unwrap(),
+            output_path_str,
         ],
         debug,
     )?;
@@ -43,7 +50,7 @@ pub fn split_and_delay_audio(
         let part = tmpdir.join(format!("part_{}.flac", i + 1));
         let (start, duration) = (prev, if i < n { split_points[i] - prev } else { 0.0 });
         let start_str = start.to_string();
-        let mut ffmpeg_args = vec!["-y", "-i", flac_path.to_str().unwrap(), "-ss", &start_str];
+        let mut ffmpeg_args = vec!["-y", "-i", path_to_str(flac_path)?, "-ss", &start_str];
         let duration_str;
         if i < n {
             duration_str = duration.to_string();
@@ -56,7 +63,7 @@ pub fn split_and_delay_audio(
             "asetpts=PTS-STARTPTS",
             "-c:a",
             "flac",
-            part.to_str().unwrap(),
+            path_to_str(&part)?,
         ]);
         run_ffmpeg(&ffmpeg_args, debug)?;
         let delay = delays[i];
@@ -67,12 +74,12 @@ pub fn split_and_delay_audio(
                 &[
                     "-y",
                     "-i",
-                    part.to_str().unwrap(),
+                    path_to_str(&part)?,
                     "-filter_complex",
                     &format!("adelay={}|{},asetpts=PTS-STARTPTS", delay_str, delay_str),
                     "-c:a",
                     "flac",
-                    delayed.to_str().unwrap(),
+                    path_to_str(&delayed)?,
                 ],
                 debug,
             )?;
@@ -86,14 +93,14 @@ pub fn split_and_delay_audio(
                 &[
                     "-y",
                     "-i",
-                    part.to_str().unwrap(),
+                    path_to_str(&part)?,
                     "-ss",
                     &trim_s_str,
                     "-af",
                     "asetpts=PTS-STARTPTS",
                     "-c:a",
                     "flac",
-                    trimmed.to_str().unwrap(),
+                    path_to_str(&trimmed)?,
                 ],
                 debug,
             )?;
@@ -116,7 +123,7 @@ pub fn concat_audio_segments(
     let mut concat_args: Vec<String> = vec!["-y".to_string()];
     for s in split_files {
         concat_args.push("-i".to_string());
-        concat_args.push(s.to_str().unwrap().to_string());
+        concat_args.push(path_to_str(s)?.to_string());
     }
     let filter_complex_str = (0..split_files.len())
         .map(|i| format!("[{}:a]", i))
@@ -129,7 +136,7 @@ pub fn concat_audio_segments(
     let final_flac = tmpdir.join("target_audio_final.flac");
     concat_args.push("-c:a".to_string());
     concat_args.push("flac".to_string());
-    concat_args.push(final_flac.to_str().unwrap().to_string());
+    concat_args.push(path_to_str(&final_flac)?.to_string());
     let concat_args_slice: Vec<&str> = concat_args.iter().map(|s| s.as_str()).collect();
     run_ffmpeg(&concat_args_slice, debug)?;
     Ok(final_flac)
@@ -147,14 +154,14 @@ pub fn convert_audio_codec(
         &[
             "-y",
             "-i",
-            input_flac.to_str().unwrap(),
+            path_to_str(input_flac)?,
             "-af",
             "asetpts=PTS-STARTPTS",
             "-c:a",
             codec,
             "-b:a",
             bitrate,
-            output_path.to_str().unwrap(),
+            path_to_str(output_path)?,
         ],
         debug,
     )?;
@@ -178,7 +185,7 @@ pub fn fit_audio_to_length(
             "format=duration",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            input_path.to_str().unwrap(),
+            path_to_str(input_path)?,
         ])
         .output()?;
     let input_duration: f64 = String::from_utf8_lossy(&output.stdout)
@@ -191,12 +198,12 @@ pub fn fit_audio_to_length(
             &[
                 "-y",
                 "-i",
-                input_path.to_str().unwrap(),
+                path_to_str(input_path)?,
                 "-af",
                 &format!("atrim=0:{:.6}", target_duration),
                 "-c:a",
                 "flac",
-                output_path.to_str().unwrap(),
+                path_to_str(output_path)?,
             ],
             debug,
         )?;
@@ -207,14 +214,14 @@ pub fn fit_audio_to_length(
             &[
                 "-y",
                 "-i",
-                input_path.to_str().unwrap(),
+                path_to_str(input_path)?,
                 "-af",
                 &format!("apad=pad_dur={:.6}", pad_len),
                 "-t",
                 &format!("{:.6}", target_duration),
                 "-c:a",
                 "flac",
-                output_path.to_str().unwrap(),
+                path_to_str(output_path)?,
             ],
             debug,
         )?;
@@ -239,7 +246,7 @@ pub fn remux_audio_stream(
     let metadata_spec = format!("-metadata:s:a:{}", audio_stream_idx);
     let title_value = format!("title={}", original_title);
     let lang_value = format!("language={}", original_lang);
-    let mut ffmpeg_remux = vec!["-y", "-i", input, "-i", new_audio.to_str().unwrap()];
+    let mut ffmpeg_remux = vec!["-y", "-i", input, "-i", path_to_str(new_audio)?];
     ffmpeg_remux.extend(map_args.iter().map(|s| s.as_str()));
     ffmpeg_remux.push("-c");
     ffmpeg_remux.push("copy");
