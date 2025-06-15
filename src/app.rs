@@ -236,34 +236,6 @@ pub fn run(args: Args) -> Result<()> {
     }
     all_splits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    // Optionally write the task to a file
-    if let Some(write_task_file) = &args.write_task_file {
-        let out_path = if let Some(path) = write_task_file {
-            path.clone().to_string()
-        } else {
-            // Use input file path with extension replaced by .json
-            let input_path = std::path::Path::new(input);
-            let mut out = input_path.to_path_buf();
-            out.set_extension("json");
-            out.to_string_lossy().to_string()
-        };
-        let task = crate::cli::Task {
-            input: Some(input.to_string()),
-            output: Some(output.to_string()),
-            stream: Some(stream),
-            initial_delay: Some(initial_delay),
-            splits: splits.clone(),
-            split_ranges: split_ranges.clone(),
-            bitrate: Some(bitrate.clone()),
-            silence_threshold: Some(silence_threshold),
-            fit_length: Some(fit_length),
-        };
-        let json = serde_json::to_string_pretty(&task)?;
-        let mut file = fs::File::create(&out_path)?;
-        file.write_all(json.as_bytes())?;
-        println!("✅ Wrote task to {}", out_path);
-    }
-
     // --- User Confirmation ---
     if !all_splits.is_empty() {
         // Get audio duration for the selected stream
@@ -333,6 +305,34 @@ pub fn run(args: Args) -> Result<()> {
                 return Ok(());
             }
         }
+    }
+
+    // Optionally write the task to a file (after confirmation)
+    if let Some(write_task_file) = &args.write_task_file {
+        let out_path = if let Some(path) = write_task_file {
+            path.clone().to_string()
+        } else {
+            // Use input file path with extension replaced by .json
+            let input_path = std::path::Path::new(input);
+            let mut out = input_path.to_path_buf();
+            out.set_extension("json");
+            out.to_string_lossy().to_string()
+        };
+        let task = crate::cli::Task {
+            input: Some(input.to_string()),
+            output: Some(output.to_string()),
+            stream: Some(stream),
+            initial_delay: Some(initial_delay),
+            splits: splits.clone(),
+            split_ranges: split_ranges.clone(),
+            bitrate: Some(bitrate.clone()),
+            silence_threshold: Some(silence_threshold),
+            fit_length: Some(fit_length),
+        };
+        let json = serde_json::to_string_pretty(&task)?;
+        let mut file = fs::File::create(&out_path)?;
+        file.write_all(json.as_bytes())?;
+        println!("✅ Wrote task to {}", out_path);
     }
 
     let mut split_points: Vec<f64> = Vec::new();
