@@ -1,9 +1,15 @@
+use crate::audio_metadata::{get_audio_stream_duration, get_file_duration, probe_audio_stream};
+use crate::audio_processing::{
+    concat_audio_segments, convert_audio_codec, extract_audio_stream_to_flac, fit_audio_to_length,
+    remux_audio_stream, split_and_delay_audio,
+};
 use crate::{
     cli::Args,
     ffmpeg::{
         check_dependency, check_ffmpeg_installation, check_ffmpeg_version, find_quietest_point,
-        get_stream_bitrate_for_processing, inspect_audio_streams, run_ffmpeg,
+        get_stream_bitrate_for_processing, inspect_audio_streams,
     },
+    task::Task,
 };
 use anyhow::{Result, bail};
 use comfy_table::{Table, presets::UTF8_FULL};
@@ -13,7 +19,6 @@ use std::{
     fs::{self},
     io,
     io::Write,
-    process::Command,
 };
 
 pub fn run(args: Args) -> Result<()> {
@@ -32,7 +37,7 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     // Load task file if provided and merge with CLI args
-    let task = args.load_task()?;
+    let task = load_task_from_args(&args)?;
     let input = args
         .input
         .as_ref()
@@ -91,78 +96,9 @@ pub fn run(args: Args) -> Result<()> {
     let tmpdir = env::temp_dir().join(format!("split_audio_{}", std::process::id()));
     fs::create_dir_all(&tmpdir)?;
 
-    // Get audio stream info to find audio track index and bitrate
-    let ffprobe_streams = Command::new("ffprobe")
-        .args(&[
-            "-v",
-            "error",
-            "-show_entries",
-            "stream=index,codec_type,codec_name",
-            "-of",
-            "csv=p=0",
-            input,
-        ])
-        .output()?;
-    let streams_info = String::from_utf8_lossy(&ffprobe_streams.stdout);
-
-    let mut audio_count = 0;
-    let mut audio_stream_idx = -1isize;
-    let mut original_codec = String::new();
-
-    for line in streams_info.lines() {
-        let parts: Vec<_> = line.split(',').collect();
-        if parts.len() >= 3 && parts[2] == "audio" {
-            if parts[0].parse::<usize>().unwrap() == stream {
-                audio_stream_idx = audio_count;
-                original_codec = parts[1].to_string();
-                break;
-            }
-            audio_count += 1;
-        }
-    }
-    if audio_stream_idx < 0 {
-        bail!("Could not find audio stream {} in mapping", stream);
-    }
-    if original_codec.is_empty() {
-        bail!("Could not determine codec for audio stream {}", stream);
-    }
-    println!("ℹ️ Original audio codec: {}", original_codec);
-
-    // Get original audio title
-    let ffprobe_title = Command::new("ffprobe")
-        .args(&[
-            "-v",
-            "error",
-            "-select_streams",
-            &format!("a:{}", audio_stream_idx),
-            "-show_entries",
-            "stream_tags=title",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            input,
-        ])
-        .output()?;
-    let original_title = String::from_utf8_lossy(&ffprobe_title.stdout)
-        .trim()
-        .to_owned();
-
-    // Get original audio language
-    let ffprobe_lang = Command::new("ffprobe")
-        .args(&[
-            "-v",
-            "error",
-            "-select_streams",
-            &format!("a:{}", audio_stream_idx),
-            "-show_entries",
-            "stream_tags=language",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            input,
-        ])
-        .output()?;
-    let original_lang = String::from_utf8_lossy(&ffprobe_lang.stdout)
-        .trim()
-        .to_owned();
+    // Get audio stream metadata
+    let audio_meta = probe_audio_stream(input, stream)?;
+    println!("ℹ️ Original audio codec: {}", audio_meta.codec);
 
     // Determine bitrate
     let bitrate = if let Some(b) = bitrate {
@@ -180,24 +116,16 @@ pub fn run(args: Args) -> Result<()> {
             }
         }
     };
+    let original_codec = audio_meta.codec.clone();
+    let original_title = audio_meta.title.clone();
+    let original_lang = audio_meta.language.clone();
+    let audio_stream_idx = audio_meta.stream_index;
 
     let flac_path = tmpdir.join("target_audio.flac");
 
     // 1. Extract target audio to temporary file for analysis
     println!("ℹ️ Extracting target audio track to temporary FLAC file...");
-    run_ffmpeg(
-        &[
-            "-y",
-            "-i",
-            input,
-            "-map",
-            &format!("0:{}", stream),
-            "-c:a",
-            "flac",
-            flac_path.to_str().unwrap(),
-        ],
-        args.debug,
-    )?;
+    extract_audio_stream_to_flac(input, stream, flac_path.as_path(), args.debug)?;
 
     // 2. Resolve split points
     println!("ℹ️ Resolving split points...");
@@ -239,7 +167,7 @@ pub fn run(args: Args) -> Result<()> {
     // --- User Confirmation ---
     if !all_splits.is_empty() {
         // Get audio duration for the selected stream
-        let audio_duration = match crate::ffmpeg::get_audio_stream_duration(input, stream) {
+        let audio_duration = match get_audio_stream_duration(input, stream) {
             Ok(Some(dur)) => format!("{:.3} s", dur),
             Ok(None) => "unknown".to_string(),
             Err(_) => "unknown".to_string(),
@@ -318,7 +246,7 @@ pub fn run(args: Args) -> Result<()> {
             out.set_extension("json");
             out.to_string_lossy().to_string()
         };
-        let task = crate::cli::Task {
+        let task = Task {
             input: Some(input.to_string()),
             output: Some(output.to_string()),
             stream: Some(stream),
@@ -348,117 +276,17 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     // 3. Split and delay
-    let mut split_files = Vec::new();
-    let mut prev = 0.0f64;
     println!("ℹ️ Splitting audio into parts...");
-    for i in 0..=n {
-        let part = tmpdir.join(format!("part_{}.flac", i + 1));
-        let (start, duration) = (prev, if i < n { split_points[i] - prev } else { 0.0 });
-
-        if i < n {
-            println!(
-                "  - Part {}: Splitting at {:.3}s (segment duration: {:.3}s)",
-                i + 1,
-                split_points[i],
-                duration
-            );
-        } else {
-            println!(
-                "  - Part {}: Final segment starting at {:.3}s",
-                i + 1,
-                start
-            );
-        }
-
-        let start_str = start.to_string();
-        let mut ffmpeg_args = vec!["-y", "-i", flac_path.to_str().unwrap(), "-ss", &start_str];
-        let duration_str;
-        if i < n {
-            duration_str = duration.to_string();
-            ffmpeg_args.push("-t");
-            ffmpeg_args.push(&duration_str);
-            prev = split_points[i];
-        }
-        ffmpeg_args.extend_from_slice(&[
-            "-af",
-            "asetpts=PTS-STARTPTS",
-            "-c:a",
-            "flac",
-            part.to_str().unwrap(),
-        ]);
-        run_ffmpeg(&ffmpeg_args, args.debug)?;
-
-        let delay = delays[i];
-        let target = if delay > 0.0 {
-            let delayed = tmpdir.join(format!("part_{}_delayed.flac", i + 1));
-            let delay_str = delay.to_string();
-            run_ffmpeg(
-                &[
-                    "-y",
-                    "-i",
-                    part.to_str().unwrap(),
-                    "-filter_complex",
-                    &format!("adelay={}|{},asetpts=PTS-STARTPTS", delay_str, delay_str),
-                    "-c:a",
-                    "flac",
-                    delayed.to_str().unwrap(),
-                ],
-                args.debug,
-            )?;
-            fs::remove_file(&part)?;
-            delayed
-        } else if delay < 0.0 {
-            let trimmed = tmpdir.join(format!("part_{}_trimmed.flac", i + 1));
-            let trim_s = (-delay as f64) / 1000.0;
-            let trim_s_str = trim_s.to_string();
-            run_ffmpeg(
-                &[
-                    "-y",
-                    "-i",
-                    part.to_str().unwrap(),
-                    "-ss",
-                    &trim_s_str,
-                    "-af",
-                    "asetpts=PTS-STARTPTS",
-                    "-c:a",
-                    "flac",
-                    trimmed.to_str().unwrap(),
-                ],
-                args.debug,
-            )?;
-            fs::remove_file(&part)?;
-            trimmed
-        } else {
-            part
-        };
-        split_files.push(target);
-    }
+    let split_files = split_and_delay_audio(
+        flac_path.as_path(),
+        &split_points,
+        &delays,
+        tmpdir.as_path(),
+        args.debug,
+    )?;
 
     // 4. Concat list
-    // Use the concat filter for robustness, as the concat demuxer can fail with timestamp issues.
-    let mut concat_args: Vec<String> = vec!["-y".to_string()];
-    for s in &split_files {
-        concat_args.push("-i".to_string());
-        concat_args.push(s.to_str().unwrap().to_string());
-    }
-
-    let filter_complex_str = (0..split_files.len())
-        .map(|i| format!("[{}:a]", i))
-        .collect::<String>()
-        + &format!("concat=n={}:v=0:a=1[a]", split_files.len());
-
-    concat_args.push("-filter_complex".to_string());
-    concat_args.push(filter_complex_str);
-    concat_args.push("-map".to_string());
-    concat_args.push("[a]".to_string());
-
-    let final_flac = tmpdir.join("target_audio_final.flac");
-    concat_args.push("-c:a".to_string());
-    concat_args.push("flac".to_string());
-    concat_args.push(final_flac.to_str().unwrap().to_string());
-
-    let concat_args_slice: Vec<&str> = concat_args.iter().map(|s| s.as_str()).collect();
-    run_ffmpeg(&concat_args_slice, args.debug)?;
+    let final_flac = concat_audio_segments(&split_files, tmpdir.as_path(), args.debug)?;
 
     // --- Fit to original length if requested ---
     println!("\n▶️ Adjusting Audio Lengths...");
@@ -468,78 +296,21 @@ pub fn run(args: Args) -> Result<()> {
     let mut processed_duration_val = None;
     let mut adjusted_duration_val = None;
     if fit_length {
-        if let Ok(Some(orig_duration)) = crate::ffmpeg::get_audio_stream_duration(input, stream) {
+        if let Ok(Some(orig_duration)) = get_audio_stream_duration(input, stream) {
             orig_duration_val = Some(orig_duration);
             // Get duration of the processed audio
-            let output = std::process::Command::new("ffprobe")
-                .args([
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    final_flac.to_str().unwrap(),
-                ])
-                .output()?;
-            let processed_duration: f64 = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .parse()
-                .unwrap_or(0.0);
+            let processed_duration = get_file_duration(final_flac.to_str().unwrap())?;
             processed_duration_val = Some(processed_duration);
             let fitted_path = tmpdir.join("target_audio_final_fitted.flac");
-            if processed_duration > orig_duration + 0.001 {
-                // Trim to original duration
-                run_ffmpeg(
-                    &[
-                        "-y",
-                        "-i",
-                        final_flac.to_str().unwrap(),
-                        "-af",
-                        &format!("atrim=0:{:.6}", orig_duration),
-                        "-c:a",
-                        "flac",
-                        fitted_path.to_str().unwrap(),
-                    ],
-                    args.debug,
-                )?;
-                fitted_flac = fitted_path;
-            } else if processed_duration < orig_duration - 0.001 {
-                // Pad with silence to original duration
-                let pad_len = orig_duration - processed_duration;
-                run_ffmpeg(
-                    &[
-                        "-y",
-                        "-i",
-                        final_flac.to_str().unwrap(),
-                        "-af",
-                        &format!("apad=pad_dur={:.6}", pad_len),
-                        "-t",
-                        &format!("{:.6}", orig_duration),
-                        "-c:a",
-                        "flac",
-                        fitted_path.to_str().unwrap(),
-                    ],
-                    args.debug,
-                )?;
-                fitted_flac = fitted_path;
-            }
+            fit_audio_to_length(
+                final_flac.as_path(),
+                fitted_path.as_path(),
+                orig_duration,
+                args.debug,
+            )?;
+            fitted_flac = fitted_path;
             // Get duration of the adjusted audio
-            let output = std::process::Command::new("ffprobe")
-                .args([
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    fitted_flac.to_str().unwrap(),
-                ])
-                .output()?;
-            let adjusted_duration: f64 = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .parse()
-                .unwrap_or(0.0);
+            let adjusted_duration = get_file_duration(fitted_flac.to_str().unwrap())?;
             adjusted_duration_val = Some(adjusted_duration);
         }
     }
@@ -575,69 +346,25 @@ pub fn run(args: Args) -> Result<()> {
         _ => "mka", // Matroska audio as a safe fallback container
     };
     let final_audio_for_remux = tmpdir.join(format!("final_for_remux.{}", final_extension));
-    run_ffmpeg(
-        &[
-            "-y",
-            "-i",
-            fitted_flac.to_str().unwrap(),
-            "-af",
-            "asetpts=PTS-STARTPTS",
-            "-c:a",
-            &original_codec,
-            "-b:a",
-            &bitrate,
-            final_audio_for_remux.to_str().unwrap(),
-        ],
+    convert_audio_codec(
+        fitted_flac.as_path(),
+        &original_codec,
+        &bitrate,
+        final_audio_for_remux.as_path(),
         args.debug,
     )?;
 
     // 6. Remux audio back in place of the original
     println!("\n▶️ Remux Audio Back in Place of the Original..");
-    let mut map_args: Vec<String> = Vec::new();
-    audio_count = 0;
-    for line in streams_info.lines() {
-        let parts: Vec<_> = line.split(',').collect();
-        if parts.len() == 3 && parts[2] == "audio" {
-            if parts[0].parse::<usize>().unwrap() == stream {
-                map_args.push("-map".to_string());
-                map_args.push("1:a:0".to_string());
-            } else {
-                map_args.push("-map".to_string());
-                map_args.push(format!("0:a:{}", audio_count));
-            }
-            audio_count += 1;
-        } else if parts.len() == 3 {
-            map_args.push("-map".to_string());
-            map_args.push(format!("0:{}", parts[0]));
-        }
-    }
-
-    // Remux
-    let metadata_spec = format!("-metadata:s:a:{}", audio_stream_idx);
-    let title_value = format!("title={}", original_title);
-    let lang_value = format!("language={}", original_lang);
-
-    let mut ffmpeg_remux = vec![
-        "-y",
-        "-i",
+    remux_audio_stream(
         input,
-        "-i",
-        final_audio_for_remux.to_str().unwrap(),
-    ];
-    ffmpeg_remux.extend(map_args.iter().map(|s| s.as_str()));
-    ffmpeg_remux.push("-c");
-    ffmpeg_remux.push("copy");
-
-    if !original_lang.is_empty() {
-        ffmpeg_remux.push(&metadata_spec);
-        ffmpeg_remux.push(&lang_value);
-    }
-    if !original_title.is_empty() {
-        ffmpeg_remux.push(&metadata_spec);
-        ffmpeg_remux.push(&title_value);
-    }
-    ffmpeg_remux.push(output);
-    run_ffmpeg(&ffmpeg_remux, args.debug)?;
+        final_audio_for_remux.as_path(),
+        output,
+        audio_stream_idx,
+        &original_title,
+        &original_lang,
+        args.debug,
+    )?;
 
     // Cleanup
     fs::remove_dir_all(&tmpdir)?;
@@ -742,4 +469,11 @@ fn handle_inspect(input: &str) -> Result<()> {
     println!("\n💡 Use the 'Index' value with --stream to select an audio stream for processing.");
 
     Ok(())
+}
+
+fn load_task_from_args(args: &Args) -> anyhow::Result<Option<Task>> {
+    match &args.task {
+        Some(Some(path)) => Task::load(Some(path.as_str())),
+        Some(None) | None => Ok(None),
+    }
 }

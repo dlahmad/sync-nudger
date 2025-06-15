@@ -1,6 +1,9 @@
 mod app;
+mod audio_metadata;
+mod audio_processing;
 mod cli;
 mod ffmpeg;
+mod task;
 
 use anyhow::Result;
 use clap::Parser;

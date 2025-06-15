@@ -89,25 +89,6 @@ pub struct SplitRange {
     pub delay: f64,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize, Default)]
-pub struct Task {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
-    pub stream: Option<usize>,
-    pub initial_delay: Option<f64>,
-    #[serde(default)]
-    pub splits: Vec<SplitPoint>,
-    #[serde(default)]
-    pub split_ranges: Vec<SplitRange>,
-    pub bitrate: Option<String>,
-    pub silence_threshold: Option<f64>,
-    /// If true, fit the edited audio stream to the original length (trim or pad with silence at the end as needed)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fit_length: Option<bool>,
-}
-
 fn parse_split(s: &str) -> Result<SplitPoint, String> {
     let pos = s
         .rfind(':')
@@ -142,17 +123,4 @@ fn parse_split_range(s: &str) -> Result<SplitRange, String> {
         return Err(format!("start time must be less than end time in '{}'", s));
     }
     Ok(SplitRange { start, end, delay })
-}
-
-impl Args {
-    pub fn load_task(&self) -> anyhow::Result<Option<Task>> {
-        match &self.task {
-            Some(Some(path)) => {
-                let contents = std::fs::read_to_string(path)?;
-                let task: Task = serde_json::from_str(&contents)?;
-                Ok(Some(task))
-            }
-            Some(None) | None => Ok(None),
-        }
-    }
 }
