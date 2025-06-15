@@ -1,11 +1,11 @@
 # Release Notes
 
-## 0.3.4
+## 0.3.5
 
 ### Features Added
 
 ### Bugs Fixed
 
-* Code refactorings applied
+* More code refactorings applied
 
-**Full Changelog**: [0.3.3...0.3.4](https://github.com/dlahmad/sync-nudger/compare/0.3.3...0.3.4)
+**Full Changelog**: [0.3.4...0.3.5](https://github.com/dlahmad/sync-nudger/compare/0.3.4...0.3.5)
