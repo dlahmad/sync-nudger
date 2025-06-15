@@ -32,6 +32,7 @@ The tool performs a series of operations to achieve its goal:
 * **Debug Logging**: Optional verbose logging from `ffmpeg` for troubleshooting (`--debug`).
 * **Automated Releases**: Multi-platform binaries are built automatically via GitHub Actions.
 * **Split Map Support**: Use a JSON file to specify all splits, split ranges, and delays, or save your configuration for reproducibility (`--split-map`, `--write-split-map`).
+* **Fit Length**: Fit the edited audio stream to the original length (trim or pad with silence at the end as needed) (`--fit-length`).
 
 ## Installation
 
@@ -200,6 +201,7 @@ sync-nudger \
 | -I    | --inspect           | Inspect input file and show all audio streams in a table                                     |
 | -w    | --write-split-map   | Write the resolved split map to this file as JSON                                            |
 | -y    | --yes               | Automatically confirm the splitting plan and proceed without prompting                       |
+| -F    | --fit-length        | Fit the edited audio stream to the original length (trim or pad with silence at the end as needed) |
 
 ### Using a Task JSON File
 
@@ -222,7 +224,8 @@ You can provide all split points, split ranges, and the initial delay in a singl
     { "startTime": 850.5, "endTime": 855.1, "delay": 360.25 }
   ],
   "bitrate": "128k",
-  "silence_threshold": -95.0
+  "silence_threshold": -95.0,
+  "fit_length": true
 }
 ```
 
@@ -231,13 +234,3 @@ You can run:
 ```sh
 sync-nudger -t task.json -y
 ```
-
-Or override any value from the task file on the CLI:
-
-```sh
-sync-nudger -t task.json -o new_output.mkv -y
-```
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

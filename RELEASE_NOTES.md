@@ -1,12 +1,13 @@
 # Release Notes
 
-## 0.3.2
+## 0.3.3
 
 ### Features Added
 
+* Final edited audio can now be trimmed/padded to the original track length
+* More descriptive logs of what happens at which time during the processing
+
 ### Bugs Fixed
 
-* Fix saving task to same directory as input file if no path is given
-* Fix task file parameter naming
 
-**Full Changelog**: [0.3.1...0.3.2](https://github.com/dlahmad/sync-nudger/compare/0.3.1...0.3.2)
+**Full Changelog**: [0.3.2...0.3.3](https://github.com/dlahmad/sync-nudger/compare/0.3.2...0.3.3)

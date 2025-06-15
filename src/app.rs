@@ -78,6 +78,11 @@ pub fn run(args: Args) -> Result<()> {
             .map(|t| t.split_ranges.clone())
             .unwrap_or_default()
     };
+    let fit_length = if args.fit_length {
+        true
+    } else {
+        task.as_ref().and_then(|t| t.fit_length).unwrap_or(false)
+    };
 
     check_ffmpeg_version(args.ignore_ffmpeg_version)?;
     check_dependency("ffprobe")?;
@@ -251,6 +256,7 @@ pub fn run(args: Args) -> Result<()> {
             split_ranges: split_ranges.clone(),
             bitrate: Some(bitrate.clone()),
             silence_threshold: Some(silence_threshold),
+            fit_length: Some(fit_length),
         };
         let json = serde_json::to_string_pretty(&task)?;
         let mut file = fs::File::create(&out_path)?;
@@ -454,7 +460,112 @@ pub fn run(args: Args) -> Result<()> {
     let concat_args_slice: Vec<&str> = concat_args.iter().map(|s| s.as_str()).collect();
     run_ffmpeg(&concat_args_slice, args.debug)?;
 
+    // --- Fit to original length if requested ---
+    println!("\n▶️ Adjusting Audio Lengths...");
+
+    let mut fitted_flac = final_flac.clone();
+    let mut orig_duration_val = None;
+    let mut processed_duration_val = None;
+    let mut adjusted_duration_val = None;
+    if fit_length {
+        if let Ok(Some(orig_duration)) = crate::ffmpeg::get_audio_stream_duration(input, stream) {
+            orig_duration_val = Some(orig_duration);
+            // Get duration of the processed audio
+            let output = std::process::Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    final_flac.to_str().unwrap(),
+                ])
+                .output()?;
+            let processed_duration: f64 = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0.0);
+            processed_duration_val = Some(processed_duration);
+            let fitted_path = tmpdir.join("target_audio_final_fitted.flac");
+            if processed_duration > orig_duration + 0.001 {
+                // Trim to original duration
+                run_ffmpeg(
+                    &[
+                        "-y",
+                        "-i",
+                        final_flac.to_str().unwrap(),
+                        "-af",
+                        &format!("atrim=0:{:.6}", orig_duration),
+                        "-c:a",
+                        "flac",
+                        fitted_path.to_str().unwrap(),
+                    ],
+                    args.debug,
+                )?;
+                fitted_flac = fitted_path;
+            } else if processed_duration < orig_duration - 0.001 {
+                // Pad with silence to original duration
+                let pad_len = orig_duration - processed_duration;
+                run_ffmpeg(
+                    &[
+                        "-y",
+                        "-i",
+                        final_flac.to_str().unwrap(),
+                        "-af",
+                        &format!("apad=pad_dur={:.6}", pad_len),
+                        "-t",
+                        &format!("{:.6}", orig_duration),
+                        "-c:a",
+                        "flac",
+                        fitted_path.to_str().unwrap(),
+                    ],
+                    args.debug,
+                )?;
+                fitted_flac = fitted_path;
+            }
+            // Get duration of the adjusted audio
+            let output = std::process::Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    fitted_flac.to_str().unwrap(),
+                ])
+                .output()?;
+            let adjusted_duration: f64 = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0.0);
+            adjusted_duration_val = Some(adjusted_duration);
+        }
+    }
+
+    // Show duration table if fit_length was used
+    if fit_length {
+        use comfy_table::Table;
+        let mut dur_table = Table::new();
+        dur_table.set_header(vec!["Type", "Duration (s)"]);
+        let orig_str = orig_duration_val
+            .map(|v| format!("{:.3}", v))
+            .unwrap_or_else(|| "unknown".to_string());
+        let new_str = processed_duration_val
+            .map(|v| format!("{:.3}", v))
+            .unwrap_or_else(|| "unknown".to_string());
+        let adj_str = adjusted_duration_val
+            .map(|v| format!("{:.3}", v))
+            .unwrap_or_else(|| "unknown".to_string());
+        dur_table.add_row(vec!["Original", orig_str.as_str()]);
+        dur_table.add_row(vec!["New (pre-adjustment)", new_str.as_str()]);
+        dur_table.add_row(vec!["Adjusted (post-fit)", adj_str.as_str()]);
+        println!("{}", dur_table);
+    }
+
     // 5. Convert final audio back to original codec
+    println!("\n▶️ Converting Audio Back to Original Codec...");
     let final_extension = match original_codec.as_str() {
         "aac" => "aac",
         "ac3" => "ac3",
@@ -468,7 +579,7 @@ pub fn run(args: Args) -> Result<()> {
         &[
             "-y",
             "-i",
-            final_flac.to_str().unwrap(),
+            fitted_flac.to_str().unwrap(),
             "-af",
             "asetpts=PTS-STARTPTS",
             "-c:a",
@@ -481,6 +592,7 @@ pub fn run(args: Args) -> Result<()> {
     )?;
 
     // 6. Remux audio back in place of the original
+    println!("\n▶️ Remux Audio Back in Place of the Original..");
     let mut map_args: Vec<String> = Vec::new();
     audio_count = 0;
     for line in streams_info.lines() {

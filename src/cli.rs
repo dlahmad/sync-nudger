@@ -66,6 +66,10 @@ pub struct Args {
     /// Automatically confirm the splitting plan and proceed without prompting
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,
+
+    /// Fit the edited audio stream to the original length (trim or pad with silence at the end of the stream as needed)
+    #[arg(short = 'F', long = "fit-length")]
+    pub fit_length: bool,
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
@@ -99,6 +103,9 @@ pub struct Task {
     pub split_ranges: Vec<SplitRange>,
     pub bitrate: Option<String>,
     pub silence_threshold: Option<f64>,
+    /// If true, fit the edited audio stream to the original length (trim or pad with silence at the end as needed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fit_length: Option<bool>,
 }
 
 fn parse_split(s: &str) -> Result<SplitPoint, String> {
