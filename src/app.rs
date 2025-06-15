@@ -1,15 +1,15 @@
-use crate::audio_metadata::{get_audio_stream_duration, get_file_duration, probe_audio_stream};
+use crate::audio_metadata::{
+    get_audio_stream_duration, get_file_duration, get_stream_bitrate_for_processing,
+    inspect_audio_streams, probe_audio_stream,
+};
 use crate::audio_processing::{
-    concat_audio_segments, convert_audio_codec, extract_audio_stream_to_flac, fit_audio_to_length,
-    remux_audio_stream, split_and_delay_audio,
+    concat_audio_segments, convert_audio_codec, extract_audio_stream_to_flac, find_quietest_point,
+    fit_audio_to_length, remux_audio_stream, split_and_delay_audio,
 };
 use crate::util::path_to_str;
 use crate::{
     cli::Args,
-    ffmpeg::{
-        check_dependency, check_ffmpeg_installation, check_ffmpeg_version, find_quietest_point,
-        get_stream_bitrate_for_processing, inspect_audio_streams,
-    },
+    ffmpeg::{check_dependency, check_ffmpeg_installation, check_ffmpeg_version},
     task::Task,
 };
 use anyhow::{Result, bail};

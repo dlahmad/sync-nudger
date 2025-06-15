@@ -1,8 +1,18 @@
 use crate::audio_metadata::build_stream_map_args;
+use crate::ffmpeg::FFmpegError;
 use crate::ffmpeg::run_ffmpeg;
 use anyhow::Result;
+use regex::Regex;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+
+#[derive(Debug)]
+pub struct QuietestPointResult {
+    pub time: f64,
+    pub loudness: f64,
+    pub debug_output: Option<String>,
+}
 
 /// Helper to convert a Path to &str, returning an error if not valid UTF-8.
 fn path_to_str(path: &Path) -> anyhow::Result<&str> {
@@ -32,6 +42,90 @@ pub fn extract_audio_stream_to_flac(
         debug,
     )?;
     Ok(())
+}
+
+pub fn find_quietest_point(
+    audio_path: &Path,
+    start: f64,
+    end: f64,
+    silence_threshold: f64,
+    debug: bool,
+) -> Result<QuietestPointResult, FFmpegError> {
+    let duration = end - start;
+    let audio_path_str = audio_path.to_str().ok_or_else(|| {
+        FFmpegError::CommandFailed(
+            "find_quietest_point".to_string(),
+            "Invalid audio path".to_string(),
+        )
+    })?;
+    let output = Command::new("ffmpeg")
+        .args(&[
+            "-i",
+            audio_path_str,
+            "-ss",
+            &start.to_string(),
+            "-t",
+            &duration.to_string(),
+            "-af",
+            "ebur128=peak=true",
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let debug_output = if debug {
+        Some(format!(
+            "\n--- FFMPEG STDERR for quietest point ---\n{}\n--- END FFMPEG STDERR ---",
+            stderr
+        ))
+    } else {
+        None
+    };
+
+    let re =
+        Regex::new(r"\[Parsed_ebur128_0 @ [^\]]+\] t:\s*([\d.]+)\s*TARGET:.*M:\s*([-\d.]+)\s*S:")
+            .unwrap();
+
+    let mut loudness_points: Vec<(f64, f64)> = Vec::new();
+    for cap in re.captures_iter(&stderr) {
+        if let (Some(time_str), Some(loudness_str)) = (cap.get(1), cap.get(2)) {
+            if let (Ok(time), Ok(loudness)) = (
+                time_str.as_str().parse::<f64>(),
+                loudness_str.as_str().parse::<f64>(),
+            ) {
+                // The ebur128 `t:` timestamp is relative to the start of the segment.
+                // We only care about points above the silence threshold.
+                if time >= start && time <= end && loudness > silence_threshold {
+                    loudness_points.push((time, loudness));
+                }
+            }
+        }
+    }
+
+    if loudness_points.is_empty() {
+        return Err(FFmpegError::CommandFailed(
+            "find_quietest_point".to_string(),
+            format!(
+                "Could not find any audible point in range {:.3}s - {:.3}s above the threshold of {:.2} LUFS. Try adjusting --silence-threshold.",
+                start, end, silence_threshold
+            ),
+        ));
+    }
+
+    // From the candidates, find the one with the lowest loudness.
+    let (quietest_time, min_loudness) = loudness_points
+        .iter()
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .map(|(t, l)| (*t, *l))
+        .unwrap(); // Safe to unwrap because loudness_points is not empty
+
+    Ok(QuietestPointResult {
+        time: quietest_time,
+        loudness: min_loudness,
+        debug_output,
+    })
 }
 
 /// Split and delay audio segments according to split points and delays.
